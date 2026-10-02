@@ -1,12 +1,12 @@
 /* ─────────── 北极星设计令牌（参照「个人战略中枢」参考稿微调）─────────── */
 :root {
-  /* 底色：深墨绿黑 + 柔光晕 */
-  --bg: #0b0f0d;
-  --bg-2: #0e1412;
-  --card: #131917;
-  --card-2: #18201c;
-  --panel-line: rgba(255, 255, 255, 0.075);
-  --border: rgba(255, 255, 255, 0.075);
+  /* 底色：近纯黑 + 墨绿光晕（贴近参考稿） */
+  --bg: #070a08;
+  --bg-2: #0a0e0c;
+  --card: #101614;
+  --card-2: #161e1a;
+  --panel-line: rgba(255, 255, 255, 0.07);
+  --border: rgba(255, 255, 255, 0.07);
   --border-strong: rgba(255, 255, 255, 0.12);
 
   /* 强调色 */
@@ -22,12 +22,15 @@
   --text-2: #98a29c;
   --text-3: #5e6a64;
 
-  --radius: 16px;
-  --radius-sm: 10px;
+  --radius: 18px;
+  --radius-sm: 12px;
   --nav-w: 208px;
   --nav-w-mini: 66px;
   --topbar-h: 84px;
 }
+
+/* 桌面版：无边框窗口右上角系统按钮（最小化/最大化/关闭）占位宽度 */
+body.is-desktop { --wctl-w: 142px; }
 
 * { box-sizing: border-box; }
 

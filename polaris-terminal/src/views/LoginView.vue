@@ -99,7 +99,7 @@ function switchMode() {
 <style scoped>
 .login-wrap {
   position: relative; min-height: 100vh; display: grid; place-items: center;
-  background: radial-gradient(1200px 600px at 50% -10%, rgba(74, 222, 128, 0.08), transparent), #121212;
+  background: radial-gradient(1200px 600px at 50% -10%, rgba(74, 222, 128, 0.08), transparent), var(--bg);
   overflow: hidden;
 }
 .grid-bg {

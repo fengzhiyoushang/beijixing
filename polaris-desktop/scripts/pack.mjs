@@ -16,8 +16,10 @@ const env = {
 }
 
 function run(cmd, args) {
-  console.log(`\n> ${cmd} ${args.join(' ')}`)
-  const r = spawnSync(cmd, args, { cwd: ROOT, stdio: 'inherit', env, shell: true })
+  // shell:true 下必须给含空格的路径加引号，否则会被截断（如 "F:\deepseek harness ..."）
+  const q = (s) => (/\s/.test(s) ? `"${s}"` : s)
+  console.log(`\n> ${q(cmd)} ${args.map(q).join(' ')}`)
+  const r = spawnSync(cmd, args.map(q), { cwd: ROOT, stdio: 'inherit', env, shell: true })
   if (r.status !== 0) process.exit(r.status ?? 1)
 }
 

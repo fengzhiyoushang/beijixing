@@ -12,6 +12,8 @@ const router = useRouter()
 const booting = ref(true)
 
 onMounted(async () => {
+  // 桌面版标记：无边框窗口的右上角系统按钮占位（TopBar 右侧留白）
+  if (window.electronAPI) document.body.classList.add('is-desktop')
   window.addEventListener('pl-logout', () => {
     booting.value = false
     if (route.path !== '/login') router.push('/login')
@@ -57,7 +59,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.boot { min-height: 100vh; display: grid; place-items: center; background: #121212; }
+.boot { min-height: 100vh; display: grid; place-items: center; background: var(--bg); }
 .boot-card {
   width: 360px; padding: 28px; background: var(--card); border: 1px solid var(--border);
   border-radius: var(--radius); text-align: center;

@@ -1,12 +1,12 @@
 /**
  * 北极星 · 设计规范 → Naive UI 主题覆盖
- * 参照「个人战略中枢」参考稿：深墨绿底 #0b0f0d | 面板 #131917 | 描边 rgba(255,255,255,.075)
- * 主强调 #4ade80 | 辅 #60a5fa / #f87171 | 文字 #e7efe9 / #98a29c / #5e6a64 | 圆角 16px
+ * 参照「个人战略中枢」参考稿：近纯黑底 #070a08 | 面板 #101614 | 描边 rgba(255,255,255,.07)
+ * 主强调 #4ade80 | 辅 #60a5fa / #f87171 | 文字 #e7efe9 / #98a29c / #5e6a64 | 圆角 18px
  */
-const LINE = 'rgba(255, 255, 255, 0.075)'
+const LINE = 'rgba(255, 255, 255, 0.07)'
 const LINE_STRONG = 'rgba(255, 255, 255, 0.12)'
-const PANEL = '#131917'
-const PANEL_2 = '#18201c'
+const PANEL = '#101614'
+const PANEL_2 = '#161e1a'
 
 export const polarisOverrides = {
   common: {
@@ -22,7 +22,7 @@ export const polarisOverrides = {
     warningColor: '#fbbf24',
     errorColor: '#f87171',
     errorColorHover: '#fca5a5',
-    bodyColor: '#0b0f0d',
+    bodyColor: '#070a08',
     cardColor: PANEL,
     modalColor: PANEL,
     popoverColor: PANEL_2,
@@ -46,15 +46,15 @@ export const polarisOverrides = {
   Card: {
     color: PANEL,
     borderColor: LINE,
-    borderRadius: '16px',
+    borderRadius: '18px',
     paddingSmall: '18px 20px',
     titleFontSizeSmall: '14.5px',
     titleTextColor: '#e7efe9',
   },
   Layout: {
-    color: '#0b0f0d',
-    headerColor: 'rgba(11, 15, 13, 0.72)',
-    siderColor: 'rgba(15, 20, 18, 0.86)',
+    color: '#070a08',
+    headerColor: 'rgba(7, 10, 8, 0.72)',
+    siderColor: 'rgba(10, 14, 12, 0.86)',
     borderColor: LINE,
   },
   Menu: {

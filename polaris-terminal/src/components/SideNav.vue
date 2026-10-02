@@ -130,8 +130,8 @@ const WEEK = ['一', '二', '三', '四', '五', '六', '日']
 }
 .side.collapsed { width: var(--nav-w-mini); }
 
-/* 品牌 */
-.brand { display: flex; align-items: center; gap: 10px; padding: 18px 16px 12px; }
+/* 品牌（桌面版可作为窗口拖拽区） */
+.brand { display: flex; align-items: center; gap: 10px; padding: 18px 16px 12px; -webkit-app-region: drag; }
 .logo { position: relative; width: 30px; height: 30px; display: grid; place-items: center; flex-shrink: 0; }
 .star { color: var(--accent); font-size: 19px; text-shadow: 0 0 16px var(--accent); }
 .ring { position: absolute; inset: 0; border: 1px solid rgba(74, 222, 128, 0.35); border-radius: 50%; }

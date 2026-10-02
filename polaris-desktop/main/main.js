@@ -38,21 +38,9 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function boot() {
-  // 精简菜单（保留复制粘贴/刷新/开发者工具，便于桌面使用）
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
-    {
-      label: '编辑',
-      submenu: [
-        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
-        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
-      ],
-    },
-    {
-      label: '视图',
-      submenu: [{ role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }],
-    },
-    { label: '窗口', submenu: [{ role: 'minimize' }, { role: 'close' }] },
-  ]))
+  // 去掉原生菜单栏（编辑/视图/窗口），内容顶到窗口最上方；
+  // 常用快捷键（Ctrl+R 刷新、Ctrl+Shift+I 开发者工具、复制粘贴）仍可正常使用。
+  Menu.setApplicationMenu(null)
 
   const [backendPort, frontPort] = await pickFreePorts(2)
 
@@ -90,8 +78,15 @@ async function boot() {
     minWidth: 1024,
     minHeight: 700,
     title: '北极星 · 个人战略终端',
-    backgroundColor: '#121212',
+    backgroundColor: '#070a08',
     show: false,
+    // 隐藏原生标题栏：内容顶到窗口最上方，右上角保留系统覆盖式窗口按钮
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#070a08',
+      symbolColor: '#9aa8a0',
+      height: 40,
+    },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

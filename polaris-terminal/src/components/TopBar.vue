@@ -242,12 +242,21 @@ function handleUser(key) {
   height: var(--topbar-h);
   flex-shrink: 0;
   display: flex; align-items: center; gap: 18px;
-  padding: 0 26px;
+  /* 右侧留出系统窗口按钮（最小化/最大化/关闭）覆盖区 */
+  padding: 0 calc(26px + var(--wctl-w, 0px)) 0 26px;
   background: linear-gradient(180deg, rgba(11, 15, 13, 0.6), rgba(11, 15, 13, 0.25));
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(10px);
   position: relative; z-index: 3;
+  /* 桌面版：顶栏作为无边框窗口的拖拽区 */
+  -webkit-app-region: drag;
 }
+/* 桌面版：所有可交互元素退出拖拽区，否则无法点击 */
+.topbar button,
+.topbar .right,
+.topbar .avatar-wrap,
+.topbar :deep(.n-button),
+.topbar :deep(.n-dropdown-trigger) { -webkit-app-region: no-drag; }
 
 /* 左侧：日期 + 大号问候语 */
 .left { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
@@ -282,7 +291,7 @@ function handleUser(key) {
 }
 .new-btn:hover { box-shadow: 0 0 24px rgba(74, 222, 128, 0.45); }
 .avatar-wrap { position: relative; cursor: pointer; }
-.online { position: absolute; right: -1px; bottom: -1px; border: 2px solid #0e1412; }
+.online { position: absolute; right: -1px; bottom: -1px; border: 2px solid var(--bg-2); }
 
 /* 弹窗 */
 .form { display: flex; flex-direction: column; gap: 14px; }
