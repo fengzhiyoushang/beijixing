@@ -1,0 +1,39 @@
+appId: com.polaris.terminal
+productName: 北极星个人战略终端
+copyright: Copyright © 2026 Polaris
+
+directories:
+  output: release
+  buildResources: build
+
+# 只把主进程代码打进 asar；前端 dist 与后端 exe 走 extraResources（放 resourcesPath，不进 asar）
+files:
+  - main/**/*
+  - package.json
+
+extraResources:
+  - from: resources/dist
+    to: dist
+  - from: resources/backend
+    to: backend
+
+win:
+  target:
+    - nsis
+  icon: build/icon.ico
+  # 不做代码签名，跳过 winCodeSign 工具链（非管理员无法创建其符号链接）
+  signAndEditExecutable: false
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 北极星个人战略终端
+
+mac:
+  target:
+    - dmg
+  icon: build/icon.icns
+  category: public.app-category.productivity

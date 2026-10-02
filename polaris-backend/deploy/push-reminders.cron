@@ -1,0 +1,40 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# 北极星 · 个人战略终端 —— 定时提醒推送 crontab 示例
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 【用途】每 10 分钟扫描一次「即将到期的 DDL 任务」与「临近的上课时间」，
+#        按用户剩余的一次性订阅额度下发微信订阅消息。
+#
+# 【脚本】polaris-backend/scripts/push_reminders.py（本仓库已提供）
+#   服务器路径：/opt/polaris-backend/scripts/push_reminders.py
+#   可选参数（本 crontab 用默认值 = 同时扫 DDL + 上课）：
+#     --kind ddl     只扫 DDL
+#     --kind class   只扫上课提醒
+#     --ahead 60     临时覆盖「提前 N 分钟」（默认 DDL 180 / 上课 30，见 .env）
+#
+# 【务必先关闭进程内定时扫描，否则会重复推送】
+#   编辑 /opt/polaris-backend/.env：WX_SCHEDULER_ENABLED=false
+#   然后 sudo systemctl restart polaris
+#
+# 【未配置微信时的行为】
+#   若 .env 里 WX_APPID / WX_APP_SECRET 为空，脚本进入演示模式：
+#   只写推送日志、不实际发送，控制台会打印
+#   「! 未配置 WX_APPID/WX_APP_SECRET，本次只记录日志不会真实发送」——不会报错。
+#
+# 【安装方式】
+#   方式一（推荐，独立文件便于审计）：
+#     sudo cp /opt/polaris-backend/deploy/push-reminders.cron /etc/cron.d/polaris-reminders
+#     sudo chown root:root /etc/cron.d/polaris-reminders
+#     sudo chmod 644 /etc/cron.d/polaris-reminders
+#     sudo systemctl restart cron          # Ubuntu 22.04 的 cron 服务名是 cron
+#   方式二（装到某个用户的 crontab，注意去掉下面那行的 "www-data" 用户名）：
+#     crontab -e   然后粘贴下面命令（删掉 "www-data" 与它前面的空格）
+#
+# 【注意】
+#   · cron 的 PATH 极短，所以 python 与脚本一律写绝对路径；
+#   · 日志重定向到 backups 目录便于回溯（目录需存在且 www-data 可写）；
+#   · 若脚本已通过后端接口提供服务，也可改用 POST /api/v1/wechat/push/scan 触发同样逻辑。
+# ═══════════════════════════════════════════════════════════════════════════
+
+# 分 时 日 月 周   用户      执行的命令
+*/10 * * * *      www-data  cd /opt/polaris-backend && /opt/polaris-backend/.venv/bin/python /opt/polaris-backend/scripts/push_reminders.py >> /opt/polaris-backend/backups/push.log 2>&1

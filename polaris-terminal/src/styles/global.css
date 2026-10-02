@@ -1,0 +1,156 @@
+/* ─────────── 北极星设计令牌（参照「个人战略中枢」参考稿微调）─────────── */
+:root {
+  /* 底色：深墨绿黑 + 柔光晕 */
+  --bg: #0b0f0d;
+  --bg-2: #0e1412;
+  --card: #131917;
+  --card-2: #18201c;
+  --panel-line: rgba(255, 255, 255, 0.075);
+  --border: rgba(255, 255, 255, 0.075);
+  --border-strong: rgba(255, 255, 255, 0.12);
+
+  /* 强调色 */
+  --accent: #4ade80;
+  --accent-soft: rgba(74, 222, 128, 0.12);
+  --blue: #60a5fa;
+  --red: #f87171;
+  --yellow: #fbbf24;
+  --purple: #c084fc;
+
+  /* 文字三级 */
+  --text-1: #e7efe9;
+  --text-2: #98a29c;
+  --text-3: #5e6a64;
+
+  --radius: 16px;
+  --radius-sm: 10px;
+  --nav-w: 208px;
+  --nav-w-mini: 66px;
+  --topbar-h: 84px;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 背景柔光：左上 / 右下绿色光晕（固定层，不拦截鼠标） */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(920px 520px at 18% -12%, rgba(74, 222, 128, 0.13), transparent 62%),
+    radial-gradient(760px 460px at 92% 112%, rgba(74, 222, 128, 0.09), transparent 62%),
+    radial-gradient(680px 340px at 52% -6%, rgba(96, 165, 250, 0.05), transparent 70%);
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(120, 140, 130, 0.28); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(74, 222, 128, 0.42); }
+::-webkit-scrollbar-track { background: transparent; }
+
+.mono, .num {
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─────────── 页面与卡片 ─────────── */
+.page {
+  padding: 4px 26px 96px; max-width: 1560px; margin: 0 auto; position: relative; z-index: 1;
+  animation: pageIn 0.2s ease;
+}
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.page-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+.page-head h2 { margin: 0; font-size: 19px; letter-spacing: 0.5px; font-weight: 650; }
+.page-head .sub { color: var(--text-3); font-size: 12px; }
+.page-head .spacer { flex: 1; }
+
+/* 通用面板（与各视图 scoped .card 视觉统一：变量已改，这里补充公共装饰） */
+.panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+    var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.card-title { display: flex; align-items: center; gap: 8px; font-size: 14.5px; color: var(--text-1); font-weight: 650; }
+.card-title .en { color: var(--text-3); font-size: 10.5px; font-weight: 400; letter-spacing: 1.2px; }
+
+/* 卡片副标题（参考稿：标题下一行小灰字说明） */
+.panel-sub { font-size: 11.5px; color: var(--text-3); margin-top: 4px; }
+
+/* 「查看全部 →」等右侧动作链接 */
+.more {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-3); font-size: 11.5px; padding: 0;
+  transition: color 0.15s ease;
+}
+.more:hover { color: var(--accent); }
+
+/* ─────────── 通用元素 ─────────── */
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.dot-green { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.dot-yellow { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+.dot-red { background: var(--red); box-shadow: 0 0 8px var(--red); }
+.dot-gray { background: var(--text-3); }
+.dot-blue { background: var(--blue); box-shadow: 0 0 8px var(--blue); }
+
+.num-big {
+  font-size: 26px; font-weight: 700; color: var(--accent);
+  font-family: "JetBrains Mono", Consolas, monospace; font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 16px rgba(74, 222, 128, 0.4);
+}
+.label-3 { font-size: 11.5px; color: var(--text-3); }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; padding: 2px 10px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-2);
+  background: rgba(255, 255, 255, 0.02);
+}
+.chip-accent { color: var(--accent); border-color: rgba(74, 222, 128, 0.35); background: rgba(74, 222, 128, 0.1); }
+.chip-blue { color: var(--blue); border-color: rgba(96, 165, 250, 0.35); background: rgba(96, 165, 250, 0.08); }
+.chip-red { color: var(--red); border-color: rgba(248, 113, 113, 0.35); background: rgba(248, 113, 113, 0.08); }
+.chip-yellow { color: var(--yellow); border-color: rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.08); }
+
+/* 状态药丸（待处理 / 已到期 …） */
+.pill {
+  font-size: 10.5px; padding: 1px 9px; border-radius: 999px;
+  color: var(--text-2); border: 1px solid var(--border); background: rgba(255, 255, 255, 0.03);
+}
+.pill-accent { color: var(--accent); border-color: rgba(74, 222, 128, 0.3); background: rgba(74, 222, 128, 0.08); }
+.pill-red { color: var(--red); border-color: rgba(248, 113, 113, 0.3); background: rgba(248, 113, 113, 0.08); }
+
+.row-line { display: flex; align-items: center; gap: 10px; padding: 10px 2px; border-bottom: 1px solid var(--border); }
+.row-line:last-child { border-bottom: none; }
+
+.chart-box { width: 100%; height: 240px; }
+
+/* ─────────── 网格系统：12 列卡片流 ─────────── */
+.grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
+.col-3 { grid-column: span 3; } .col-4 { grid-column: span 4; } .col-5 { grid-column: span 5; }
+.col-6 { grid-column: span 6; } .col-7 { grid-column: span 7; } .col-8 { grid-column: span 8; }
+.col-12 { grid-column: span 12; } .row-2 { grid-row: span 2; }
+
+@media (max-width: 1200px) {
+  .col-3, .col-4, .col-5 { grid-column: span 6; }
+  .col-7, .col-8 { grid-column: span 12; }
+}
+@media (max-width: 860px) {
+  .grid > * { grid-column: span 12 !important; }
+}
+
+.fade-enter-active, .fade-leave-active { transition: opacity 0.18s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }

@@ -1,0 +1,37 @@
+# ── 依赖与虚拟环境 ──
+node_modules/
+.venv/
+venv/
+
+# ── 构建产物 ──
+dist/
+polaris-backend/build/
+polaris-backend/dist/
+polaris-desktop/release/
+polaris-desktop/resources/
+polaris-desktop/.builder-cache/
+polaris-desktop/.tmp-verify/
+miniprogram_npm/
+
+# ── 环境与数据（敏感/本地生成，不入库）──
+.env
+data/
+backups/
+uploads/
+*.db
+*.sqlite
+
+# ── 日志与临时文件 ──
+*.log
+*.err.log
+dsh-web-*.url.txt
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# ── IDE / OS ──
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

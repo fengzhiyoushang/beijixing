@@ -1,0 +1,39 @@
+html, body, #app { height: 100%; margin: 0; }
+body {
+  background: #070c16;
+  color: #c9d6e8;
+  background-image:
+    radial-gradient(1100px 520px at 85% -10%, rgba(0, 229, 160, 0.08), transparent),
+    radial-gradient(900px 500px at -10% 30%, rgba(56, 189, 248, 0.06), transparent),
+    linear-gradient(rgba(56, 189, 248, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.05) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 28px 28px, 28px 28px;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(0, 229, 160, 0.25); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 229, 160, 0.45); }
+::-webkit-scrollbar-track { background: transparent; }
+
+.glow-text { text-shadow: 0 0 14px rgba(0, 229, 160, 0.55); }
+.mono { font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace; }
+.page { padding: 18px 22px 40px; }
+.section-title {
+  color: #7ee9c6; font-size: 13px; letter-spacing: 2px;
+  margin: 4px 0 10px; font-family: Consolas, monospace;
+}
+.stat-num { font-size: 26px; font-weight: 700; color: #e9fff7; text-shadow: 0 0 12px rgba(0, 229, 160, 0.4); }
+.chart { width: 100%; height: 260px; }
+
+/* Markdown 渲染（AI 回复 / 知识库预览） */
+.md-body { font-size: 13px; line-height: 1.75; word-break: break-word; }
+.md-body h1, .md-body h2, .md-body h3 { color: #d7fbe8; margin: 12px 0 6px; font-size: 15px; }
+.md-body p { margin: 6px 0; }
+.md-body code { background: rgba(56, 189, 248, 0.12); padding: 1px 5px; border-radius: 4px; font-family: Consolas, monospace; color: #86efd4; }
+.md-body pre { background: rgba(8, 13, 24, 0.9); border: 1px solid rgba(56, 189, 248, 0.15); padding: 10px; border-radius: 8px; overflow-x: auto; }
+.md-body pre code { background: none; }
+.md-body table { border-collapse: collapse; margin: 8px 0; }
+.md-body th, .md-body td { border: 1px solid rgba(56, 189, 248, 0.2); padding: 4px 10px; }
+.md-body blockquote { border-left: 3px solid #00e5a0; margin: 6px 0; padding: 2px 12px; color: #9fb8ce; }
+.md-body ul, .md-body ol { padding-left: 20px; margin: 6px 0; }
+.md-body img { max-width: 100%; }

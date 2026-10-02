@@ -1,0 +1,25 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Docker Compose 覆盖文件（自动加载，无需 -f 指定）
+# 作用：把 .env 中的开发机地址换成容器网络内的服务名
+#   MYSQL_HOST: 127.0.0.1  →  mysql
+#   REDIS_URL:  redis://127.0.0.1:6379/0  →  redis://redis:6379/0
+# 原因：容器里的 127.0.0.1 指向容器自身，连不到 MySQL / Redis 服务。
+#
+# 若你的 .env 已经写好容器地址（MYSQL_HOST=mysql、REDIS_URL=redis://redis:6379/0），
+# 这个文件不会被破坏任何东西；若你不想用它，直接删除即可，
+# 但那时请确保 .env 中的地址就是容器内可解析的服务名。
+#
+# 注意：environment 的优先级高于 env_file，因此这里能安全覆盖 .env。
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+  api:
+    environment:
+      DB_BACKEND: mysql
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_DB: ${MYSQL_DB:-polaris_terminal}
+      REDIS_URL: redis://redis:6379/0
+      REDIS_ENABLED: "true"
+      TZ: Asia/Shanghai

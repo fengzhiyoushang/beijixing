@@ -1,0 +1,151 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# 北极星 · 个人战略终端 —— Docker Compose 一键编排（api + mysql + redis）
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 【使用说明（按顺序执行）】
+#   1) 准备环境变量文件（必须，compose 会读取它）：
+#        cd polaris-backend
+#        cp .env.example .env          # Windows: copy .env.example .env
+#      然后编辑 .env，至少填两项：
+#        MYSQL_PASSWORD=<你的数据库密码>
+#        DEEPSEEK_API_KEY=sk-xxxxxxxx  # 不填则 AI 进入演示模式，其余功能正常
+#
+#   2) 启动三个服务（首次会自动构建 api 镜像，约 2~5 分钟）：
+#        docker compose up -d
+#
+#   3) 首次启动后初始化数据库（建库 + 建表 + 演示数据 admin/admin123）：
+#        docker compose exec api python scripts/init_db.py --seed
+#      —— 这是推荐做法：不引入额外 entrypoint 脚本，步骤显式、可重复执行（幂等）。
+#      —— 只想建表不要演示数据：docker compose exec api python scripts/init_db.py
+#      —— 查看各表行数：      docker compose exec api python scripts/init_db.py --stats
+#
+#   4) 验证：
+#        curl http://127.0.0.1:8000/health
+#        # 浏览器打开 http://127.0.0.1:8000/docs
+#
+#   5) 停止 / 清理：
+#        docker compose stop                 # 停止容器，保留数据
+#        docker compose down                 # 删除容器，保留数据卷（数据不丢）
+#        docker compose down -v              # 连数据卷一起删除（MySQL 数据全丢，慎用）
+#
+# ── 【重要：容器内的 MySQL / Redis 地址】────────────────────────────────────
+#   .env.example 里是开发机配置（127.0.0.1），照抄进容器会连不上数据库。
+#   本项目默认附带 docker-compose.override.yml，compose 会自动加载它并覆盖为：
+#     DB_BACKEND=mysql
+#     MYSQL_HOST=mysql
+#     MYSQL_PORT=3306
+#     MYSQL_USER=root
+#     MYSQL_PASSWORD=<取自 .env>
+#     MYSQL_DB=polaris_terminal
+#     REDIS_URL=redis://redis:6379/0
+#   若你删除了该覆盖文件，请手工在 .env 中改成上面这套值，或在下方 api 的
+#   environment: 中取消注释对应的覆盖项（environment 优先级高于 env_file）。
+#
+# ── 【没有外部 MySQL、想先跑起来？】────────────────────────────────────────
+#   在 .env 中设置 DB_BACKEND=sqlite（并把 DB_ECHO 保持 false），
+#   然后 docker compose up -d api（只起 api，不起 mysql/redis），
+#   SQLite 文件落在 ./data/polaris.db（compose 已把 ./data 挂载到容器 /app/data）。
+#
+# ── 【端口占用排查】────────────────────────────────────────────────────────
+#   宿主机 8000/3306/6379 被占用时，改下方 "宿主机端口:容器端口" 的左侧即可，
+#   例如 "18000:8000"；改完用 http://127.0.0.1:18000/health 访问。
+#   在已有 MySQL/Redis 的机器上部署时，请直接注释掉 mysql 服务的 "3306:3306" 映射，
+#   并把 .env 的 MYSQL_HOST 指回宿主机（Docker Desktop 用 host.docker.internal，
+#   Linux 用 172.17.0.1 或 --add-host=host.docker.internal:host-gateway）。
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+
+  # ── 后端 API（FastAPI + uvicorn，2 workers）──
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: polaris-backend:1.0.0
+    container_name: polaris-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # ↓↓↓ 容器内网络地址覆盖（已生效，优先级高于 env_file）↓↓↓
+      # 若删掉 docker-compose.override.yml，这里的值依然能保证容器内地址正确
+      DB_BACKEND: mysql
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      REDIS_URL: redis://redis:6379/0
+      TZ: Asia/Shanghai
+      # 与 .env 的示例值一致，避免明文重复；如需放行其它来源，改 .env 的 CORS_ORIGINS 即可
+      # （Windows/macOS 的 Docker Desktop 若用浏览器访问前端，请把前端地址换成
+      #   http://host.docker.internal:5200，或让前端也跑在容器里）
+      CORS_ORIGINS: http://localhost:5200,http://127.0.0.1:5200,http://localhost:5173
+    ports:
+      - "8000:8000"
+    volumes:
+      # 上传文件与备份落盘到宿主机，重建容器不丢数据
+      - ./uploads:/app/uploads
+      - ./backups:/app/backups
+      - ./data:/app/data
+    depends_on:
+      mysql:
+        condition: service_healthy     # 等 MySQL 真正可连接后再启动 api
+      redis:
+        condition: service_healthy
+    networks:
+      - polaris-net
+
+  # ── MySQL 8.0（utf8mb4，中文与 emoji 均可存储）──
+  mysql:
+    image: mysql:8.0
+    container_name: polaris-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --default-authentication-plugin=mysql_native_password
+      - --max_connections=300
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DB:-polaris_terminal}
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"          # 仅本机调试需要；公网服务器请注释掉这一行
+    volumes:
+      - polaris-mysql-data:/var/lib/mysql
+    healthcheck:
+      # 用 mysqladmin status 只探测「服务是否已就绪」，不校验密码：
+      # 这样密码含 $、" 等特殊字符时也不会让健康检查误判
+      test: ["CMD-SHELL", "mysqladmin status -h 127.0.0.1 -uroot --silent >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    networks:
+      - polaris-net
+
+  # ── Redis 7（appendonly 持久化；不可用时后端自动降级为进程内缓存）──
+  redis:
+    image: redis:7-alpine
+    container_name: polaris-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - polaris-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - polaris-net
+
+volumes:
+  polaris-mysql-data:
+    name: polaris-mysql-data
+  polaris-redis-data:
+    name: polaris-redis-data
+
+networks:
+  polaris-net:
+    name: polaris-net
+    driver: bridge

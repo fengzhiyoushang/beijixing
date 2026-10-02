@@ -1,0 +1,19 @@
+# Python / backend
+__pycache__/
+*.pyc
+.venv/
+data/*.db
+uploads/
+.env
+
+# Node / web
+node_modules/
+web/dist/
+
+# 小程序构建产物
+miniprogram/miniprogram_npm/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store

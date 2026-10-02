@@ -1,0 +1,80 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# 北极星 · 个人战略终端 —— 后端 systemd 常驻单元
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 【放置位置】
+#     /etc/systemd/system/polaris.service
+#
+# 【启用步骤】
+#     # 1) 代码与虚拟环境（路径必须与下面的 WorkingDirectory / ExecStart 一致）
+#     mkdir -p /opt/polaris-backend
+#     # 用 git clone / scp / rsync 把 polaris-backend 放到 /opt/polaris-backend
+#     cd /opt/polaris-backend
+#     python3 -m venv .venv
+#     .venv/bin/pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+#     cp .env.example .env && vim .env          # 填 MYSQL_PASSWORD / DEEPSEEK_API_KEY / JWT_SECRET
+#     .venv/bin/python scripts/init_db.py --seed
+#
+#     # 2) 目录归属（服务以 www-data 运行，需要能写 uploads / backups / data）
+#     mkdir -p /opt/polaris-backend/{uploads,backups,data}
+#     chown -R www-data:www-data /opt/polaris-backend
+#
+#     # 3) 安装并启动
+#     systemctl daemon-reload
+#     systemctl enable --now polaris.service
+#     systemctl status polaris.service
+#     journalctl -u polaris.service -f          # 实时看日志
+#     curl http://127.0.0.1:8000/health         # 期望 status=ok
+#
+# 【注意】
+#   · 以 SQLite 回退模式运行时（DB_BACKEND=sqlite），--workers 必须改成 1，
+#     多进程同时写同一个 db 文件会触发 database is locked。
+#   · 修改本文件后必须 systemctl daemon-reload 才生效。
+#   · 端口只监听 127.0.0.1，公网访问一律经 Nginx 反代（见 deploy/nginx.conf）。
+# ═══════════════════════════════════════════════════════════════════════════
+
+[Unit]
+Description=Polaris Terminal API (FastAPI + uvicorn)
+Documentation=file:///opt/polaris-backend/README.md
+After=network.target mysql.service redis-server.service
+Wants=mysql.service redis-server.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+
+WorkingDirectory=/opt/polaris-backend
+Environment=PYTHONIOENCODING=utf-8
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=Asia/Shanghai
+Environment=PYTHONDONTWRITEBYTECODE=1
+# 不需要 EnvironmentFile：后端由 pydantic-settings 自动读取 /opt/polaris-backend/.env；
+# 若你想让 systemd 也注入一份，取消下一行注释（两处同时存在时以进程内 .env 解析结果为准）。
+# EnvironmentFile=-/opt/polaris-backend/.env
+
+# 如未使用 venv，把下面路径换成系统解释器：/usr/bin/python3
+ExecStart=/opt/polaris-backend/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 2 \
+    --proxy-headers \
+    --forwarded-allow-ips=127.0.0.1 \
+    --log-level info
+
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+# ── 基础加固（保持保守，避免误伤 venv 与 uploads/backups 写入）──
+NoNewPrivileges=true
+PrivateTmp=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=polaris-api
+
+[Install]
+WantedBy=multi-user.target

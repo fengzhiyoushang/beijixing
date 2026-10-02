@@ -1,0 +1,42 @@
+# ── 构建上下文排除清单（减少镜像体积、避免把本机数据打进镜像）──
+
+# 虚拟环境与缓存
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 本机运行期数据（不进入镜像，由 compose 挂载宿主机目录）
+data/
+backups/
+uploads/
+*.db
+*.sqlite
+*.sqlite3
+
+# 环境变量与密钥（镜像内只保留 .env.example）
+.env
+.env.*
+!.env.example
+
+# 版本控制与编辑器
+.git/
+.gitignore
+.idea/
+.vscode/
+*.log
+*.swp
+
+# 容器与编排文件本身
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# 文档
+README.md
+docs/
+deploy/
