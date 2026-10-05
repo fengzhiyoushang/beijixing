@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { NButton, NSwitch, NPopconfirm, useMessage } from 'naive-ui'
 import { aiApi } from '../api'
 import { streamChat } from '../api/http'
+import { store } from '../store'
 
 const message = useMessage()
 
@@ -84,7 +85,10 @@ function send() {
         scrollToBottom()
       },
       onToken: (c) => { reply.content += c; scrollToBottom() },
-      onDone: () => { reply.pending = false; streaming.value = false; streamCtl = null; loadSessions() },
+      onDone: (d) => {
+        reply.pending = false; streaming.value = false; streamCtl = null; loadSessions()
+        store.applyTokenSummary(d?.token_summary)
+      },
       onError: (e) => {
         reply.pending = false
         reply.error = e.message || 'AI 服务异常'
@@ -232,8 +236,38 @@ const hasChat = computed(() => messages.value.length > 0)
 .mode-chip { font-size: 10px; text-align: center; padding: 3px 8px; border-radius: 999px; border: 1px solid #facc1566; color: #facc15; }
 .mode-chip.live { border-color: #4ade8066; color: #4ade80; }
 
-.chat { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 0; overflow: hidden; }
-.chat-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); gap: 12px; }
+.chat { position: relative; flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--card); border: 1px solid transparent; border-radius: var(--radius); padding: 0; }
+/* 荧光边缘：mask 裁出 1.5px 描边环，窄亮段 = 游动粒子，不染色面板内部 */
+.chat::before {
+  content: ''; position: absolute; inset: -1.5px; z-index: 5;
+  border-radius: calc(var(--radius) + 2px);
+  padding: 1.5px;
+  background: conic-gradient(from var(--glow-angle, 0deg),
+    transparent 0 7%, rgba(74, 222, 128, 0.95) 9% 10.5%,
+    transparent 12.5% 26%, rgba(96, 165, 250, 0.9) 28% 29%,
+    transparent 31% 47%, rgba(74, 222, 128, 0.85) 49% 50%,
+    transparent 52% 68%, rgba(192, 132, 252, 0.9) 70% 71.5%,
+    transparent 73.5% 88%, rgba(74, 222, 128, 0.9) 90% 91%,
+    transparent 93% 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  animation: glowSpin 7s linear infinite;
+  filter: blur(0.6px) brightness(1.2);
+  pointer-events: none;
+}
+.chat::after {
+  content: ''; position: absolute; inset: -8px; z-index: -2; border-radius: calc(var(--radius) + 10px);
+  background: radial-gradient(120% 90% at 50% 0%, rgba(74, 222, 128, 0.14), transparent 60%),
+              radial-gradient(120% 90% at 50% 100%, rgba(74, 222, 128, 0.1), transparent 60%);
+  animation: glowBreath 3.2s ease-in-out infinite; pointer-events: none;
+}
+@property --glow-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes glowSpin { to { --glow-angle: 360deg; } }
+@keyframes glowBreath { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+.chat:focus-within::before { animation-duration: 2.4s; filter: blur(0px) brightness(1.35); }
+.chat-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); gap: 12px; border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0; }
 .opts { display: flex; gap: 16px; }
 .opt { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #9ca3af; }
 

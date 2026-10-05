@@ -3,7 +3,7 @@
  * 渲染端（Vue）检测 window.electronAPI 存在时走原生保存，否则保持浏览器 blob 下载，
  * Web 端行为不受影响。
  */
-const { contextBridge, ipcRenderer, shell } = require('electron')
+const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
@@ -15,5 +15,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   saveBlob: (defaultName, data) =>
     ipcRenderer.invoke('save-blob', { defaultName, data: data instanceof ArrayBuffer ? new Uint8Array(data) : data }),
-  openExternal: (url) => shell.openExternal(url),
+  // 沙箱预加载脚本无法直接使用 shell，须经 IPC 交给主进程用系统默认浏览器打开
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
 })

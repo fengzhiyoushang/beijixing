@@ -4,6 +4,8 @@ import { getToken } from '../api/http'
 const routes = [
   { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { title: '登录', plain: true } },
   { path: '/', name: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { title: '总览', icon: '◎' } },
+  { path: '/bookmarks', name: 'bookmarks', component: () => import('../views/BookmarksView.vue'), meta: { title: '地址中心', icon: '🌐' } },
+  { path: '/news', name: 'news', component: () => import('../views/NewsView.vue'), meta: { title: '新闻资讯', icon: '📰' } },
   { path: '/courses', name: 'courses', component: () => import('../views/CoursesView.vue'), meta: { title: '课程表', icon: '▤' } },
   { path: '/notes', name: 'notes', component: () => import('../views/NotesView.vue'), meta: { title: '事项备忘', icon: '☑' } },
   { path: '/classroom', name: 'classroom', component: () => import('../views/ClassroomView.vue'), meta: { title: '空教室', icon: '▣' } },

@@ -123,6 +123,8 @@ function send(text) {
         if (data?.session_id) sessionId.value = data.session_id
         if (!item.text) item.text = '（模型未返回内容）'
         scrollBottom()
+        // done 事件携带真实 token 汇总 → 即时刷新顶栏显示
+        store.applyTokenSummary(data?.token_summary)
         // 工具可能已经改动了数据（新建任务/记账等），刷新看板
         if (item.tools.length) store.refresh()
       },
@@ -257,25 +259,76 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   background: var(--accent); color: #05130a; font-weight: 700;
 }
 
-/* 面板（参考稿：深色半透明 · 圆角 16 · 无气泡式的 AI 文本） */
+/* 面板（参考稿：深色半透明 · 荧光描边边缘 · 圆角 16） */
 .panel {
   position: fixed; z-index: 95;
   width: 392px; max-width: calc(100vw - 40px);
   background: rgba(19, 25, 23, 0.94);
-  border: 1px solid var(--border-strong);
+  border: 1px solid transparent;
   border-radius: var(--radius);
-  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.62), 0 0 34px rgba(74, 222, 128, 0.08);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.62), 0 0 26px rgba(74, 222, 128, 0.16);
   display: flex; flex-direction: column;
-  overflow: hidden;
   backdrop-filter: blur(14px);
 }
+/* 荧光边缘：mask 裁出 1.5px 描边环，conic 窄亮段 = 沿边缘游动的荧光粒子；
+   粒子只存在于边框环上，不会透过半透明面板染色内部内容 */
+.panel::before {
+  content: '';
+  position: absolute; inset: -1.5px; z-index: 5;
+  border-radius: calc(var(--radius) + 2px);
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--glow-angle, 0deg),
+    transparent 0 7%,
+    rgba(74, 222, 128, 0.95) 9% 10.5%,
+    transparent 12.5% 26%,
+    rgba(96, 165, 250, 0.9) 28% 29%,
+    transparent 31% 47%,
+    rgba(74, 222, 128, 0.85) 49% 50%,
+    transparent 52% 68%,
+    rgba(192, 132, 252, 0.9) 70% 71.5%,
+    transparent 73.5% 88%,
+    rgba(74, 222, 128, 0.9) 90% 91%,
+    transparent 93% 100%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  animation: glowSpin 7s linear infinite;
+  filter: blur(0.6px) brightness(1.2);
+  pointer-events: none;
+}
+.panel::after {
+  content: '';
+  position: absolute; inset: -8px; z-index: -2; border-radius: calc(var(--radius) + 10px);
+  background: radial-gradient(120% 90% at 50% 0%, rgba(74, 222, 128, 0.16), transparent 60%),
+              radial-gradient(120% 90% at 50% 100%, rgba(74, 222, 128, 0.12), transparent 60%);
+  animation: glowBreath 3.2s ease-in-out infinite;
+  pointer-events: none;
+}
+@property --glow-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes glowSpin { to { --glow-angle: 360deg; } }
+@keyframes glowBreath {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+/* 输入聚焦时荧光增强 */
+.panel:has(.n-input--focus)::before { animation-duration: 2.4s; filter: blur(0px) brightness(1.35); }
+.panel:has(.n-input--focus) { box-shadow: 0 22px 60px rgba(0, 0, 0, 0.62), 0 0 44px rgba(74, 222, 128, 0.3); }
 .dragging { user-select: none; cursor: grabbing; }
+.dragging::before, .dragging::after { animation-play-state: paused; }
 
 .p-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 12px; cursor: grab;
   background: linear-gradient(90deg, rgba(74, 222, 128, 0.1), transparent);
   border-bottom: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
 }
 .p-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
 .p-star { color: var(--accent); text-shadow: 0 0 12px var(--accent); }

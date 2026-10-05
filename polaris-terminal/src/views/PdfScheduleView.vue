@@ -39,6 +39,34 @@ async function doUpload(files) {
 
 /* ── 筛选 ── */
 const DAY_CN = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
+/** 解析模式 → 中文（不再直接显示 image_only 之类的内部标识） */
+const MODE_LABEL = {
+  grid: '网格表格',
+  list: '明细清单',
+  text: '文本解析',
+  image_only: '图片扫描件',
+  vision: 'AI 视觉识别',
+  ai: 'AI 识别',
+  mixed: '文本+图片',
+}
+
+/** 失败原因标题（按模式给出更准确的描述） */
+const ERROR_TITLE = {
+  image_only: '这是图片扫描件，需要 AI 视觉识别',
+  vision: 'AI 视觉识别未成功',
+  text: '未识别到课表内容',
+}
+
+function gotoExcel() {
+  message.info('可在「课程表 → 导入个人课表 Excel」，或到「空教室」页导入教室课表 Excel')
+}
+
+function gotoClassroom() {
+  window.location.hash = ''
+  window.history.pushState({}, '', '/classroom')
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
 const filters = ref({ room_no: null, weekday: null, week: null, day: null, course_type: null, keyword: '' })
 const roomOptions = computed(() => (ps.value.options.rooms || []).map((r) => ({ label: r, value: r })))
 const typeOptions = computed(() => (ps.value.options.course_types || []).map((t) => ({ label: t, value: t })))
@@ -101,7 +129,6 @@ function fmtSize(n) {
 <template>
   <div class="pdf-schedule">
     <div class="pdf-head">
-      <span class="sub mono">PDF 教室课表 · 上传 → 解析 → 结构化可视化</span>
       <span class="spacer" />
       <input ref="fileInput" type="file" accept=".pdf" multiple style="display:none" @change="onFiles" />
       <NButton size="small" type="primary" ghost :loading="ps.uploading" @click="pickFiles">⬆ 上传 PDF 课表</NButton>
@@ -138,13 +165,34 @@ function fmtSize(n) {
             <span v-if="u.semester" class="chip">{{ u.semester }}</span>
           </div>
           <div class="up-meta mono">
-            {{ fmtSize(u.file_size) }} · 模式 {{ u.parse_mode || '—' }} · 条目 {{ u.entry_count }} ·
+            {{ fmtSize(u.file_size) }} · 模式 {{ MODE_LABEL[u.parse_mode] || u.parse_mode || '—' }} ·
+            条目 {{ u.entry_count }} ·
             置信度 {{ Math.round((u.confidence || 0) * 100) }}% · {{ u.created_at }}
           </div>
-          <div v-if="u.error" class="up-error">⚠ {{ u.error }}</div>
-          <ul v-if="u.suggestions && u.suggestions.length" class="up-sug">
-            <li v-for="(s, i) in u.suggestions" :key="i">{{ s }}</li>
-          </ul>
+
+          <!-- 失败原因：完整可读，不截断 -->
+          <div v-if="u.error" class="up-error">
+            <span class="ue-ico">⚠</span>
+            <div class="ue-body">
+              <div class="ue-title">{{ ERROR_TITLE[u.parse_mode] || '解析失败' }}</div>
+              <div class="ue-text">{{ u.error }}</div>
+            </div>
+          </div>
+
+          <!-- 处理建议：逐条列出，可操作 -->
+          <div v-if="u.suggestions && u.suggestions.length" class="up-sug-wrap">
+            <div class="us-title mono">可以这样处理：</div>
+            <ul class="up-sug">
+              <li v-for="(s, i) in u.suggestions" :key="i">{{ s }}</li>
+            </ul>
+          </div>
+
+          <!-- 失败项的快捷补救入口 -->
+          <div v-if="u.status === 'failed'" class="up-ops">
+            <NButton size="tiny" secondary @click="pickFiles">↻ 换个文件重传</NButton>
+            <NButton size="tiny" quaternary @click="gotoExcel">▤ 改用 Excel 教室课表导入</NButton>
+            <NButton size="tiny" quaternary @click="gotoClassroom">🏫 去空教室页导入</NButton>
+          </div>
         </div>
         <NPopconfirm @positive-click="removeUpload(u.id)">
           <template #trigger><NButton size="tiny" quaternary type="error">删除</NButton></template>
@@ -256,9 +304,27 @@ function fmtSize(n) {
 .up-main { flex: 1; min-width: 0; }
 .up-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; color: #e5e7eb; }
 .up-meta { margin-top: 3px; font-size: 11px; color: #6b7280; }
-.up-error { margin-top: 4px; font-size: 12px; color: #f87171; }
-.up-sug { margin: 4px 0 0 18px; padding: 0; font-size: 12px; color: #9ca3af; }
+
+/* 失败原因：完整展示，不截断 */
+.up-error {
+  display: flex; align-items: flex-start; gap: 7px;
+  margin-top: 7px; padding: 8px 10px; border-radius: 8px;
+  background: rgba(248, 113, 113, 0.07);
+  border: 1px solid rgba(248, 113, 113, 0.28);
+}
+.ue-ico { color: #f87171; font-size: 12px; line-height: 1.5; flex-shrink: 0; }
+.ue-body { min-width: 0; }
+.ue-title { font-size: 12px; color: #f87171; font-weight: 600; margin-bottom: 3px; }
+.ue-text { font-size: 11.5px; color: var(--text-2, #9ca3af); line-height: 1.65; word-break: break-word; }
+
+/* 处理建议 */
+.up-sug-wrap { margin-top: 7px; }
+.us-title { font-size: 10.5px; color: var(--text-3, #6b7280); margin-bottom: 3px; }
+.up-sug { margin: 0 0 0 17px; padding: 0; font-size: 11.5px; color: var(--text-2, #9ca3af); line-height: 1.7; }
 .up-sug li { margin: 2px 0; }
+
+/* 失败项快捷补救 */
+.up-ops { display: flex; gap: 7px; margin-top: 9px; flex-wrap: wrap; }
 
 .filter-bar { display: flex; align-items: center; gap: 10px; padding: 12px 14px; flex-wrap: wrap; }
 .f-item { width: 130px; }

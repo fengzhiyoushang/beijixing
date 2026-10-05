@@ -78,9 +78,16 @@ export const classroomApi = {
   overview: () => http.get('/classroom/overview'),
   freeRate: (building, roomNo, days = 120) =>
     http.get('/classroom/free-rate', { building, room_no: roomNo, days_back: days }),
-  buildingUsage: (building, days = 120) =>
-    http.get('/classroom/building-usage', { building, days_back: days }),
-  campusUsage: (days = 120) => http.get('/classroom/campus-usage', { days_back: days }),
+  /** 教学楼使用状态图；opts: {on_date:'YYYY-MM-DD', week:number} 支持精确日期查询 */
+  buildingUsage: (building, opts = {}) =>
+    http.get('/classroom/building-usage', { building, days_back: opts.days_back ?? 120,
+                                            on_date: opts.on_date, week: opts.week }),
+  /** 全校使用状态图；opts: {on_date:'YYYY-MM-DD', week:number} */
+  campusUsage: (opts = {}) =>
+    http.get('/classroom/campus-usage', { days_back: opts.days_back ?? 120,
+                                          on_date: opts.on_date, week: opts.week }),
+  /** 学期信息（起始日对齐周一 + 某日期对应教学周） */
+  semester: (onDate) => http.get('/classroom/semester', onDate ? { on_date: onDate } : undefined),
   predict: (weekday, hour, limit = 5) => http.get('/classroom/predict', { weekday, hour, limit }),
   today: () => http.get('/classroom/today'),
   recent: (limit = 10, extra = {}) => http.get('/classroom/status/recent', { limit, ...extra }),
@@ -142,9 +149,9 @@ export const classroomApi = {
     form.append('file', file)
     return http.uploadForm('/classroom/usage/import-excel', form)
   },
-  /** 某教室指定时段使用详情 */
-  usageAt: (building, room_no, day, hour) =>
-    http.get('/classroom/usage-at', { building, room_no, day, hour }),
+  /** 某教室指定时段使用详情（day: 'YYYY-MM-DD'；week 可选，缺省由日期换算） */
+  usageAt: (building, room_no, day, hour, week) =>
+    http.get('/classroom/usage-at', { building, room_no, day, hour, week }),
   /** 下载使用信息 Excel 模板（带鉴权的 blob 下载） */
   downloadUsageTemplate: async () => {
     const resp = await fetch(`${API_BASE}/classroom/usage/template`, {
@@ -184,6 +191,7 @@ export const kaoyanApi = {
   createPhase: (payload) => http.post('/kaoyan/plans/phases', payload),
   updatePhase: (id, payload) => http.put(`/kaoyan/plans/phases/${id}`, payload),
   removePhase: (id) => http.del(`/kaoyan/plans/phases/${id}`),
+  intel: (refresh = false) => http.get('/kaoyan/intel', refresh ? { refresh: true } : undefined),
 }
 
 /* ⑧ 知识库 */
@@ -255,6 +263,11 @@ export const aiApi = {
   callTool: (name, args = {}) => http.post('/ai/tools/call', { name, arguments: args }),
   status: () => http.get('/ai/status'),
   reindex: () => http.post('/ai/reindex'),
+  llmConfig: () => http.get('/ai/config'),
+  saveLlmConfig: (payload) => http.put('/ai/config', payload),
+  testLlmConfig: (payload) => http.post('/ai/config/test', payload),
+  usage: () => http.get('/ai/usage'),
+  recentUsage: (limit = 20) => http.get('/ai/usage/recent', { limit }),
 }
 
 /* ⑭ PDF 教室课表 */
@@ -270,6 +283,32 @@ export const pdfScheduleApi = {
   remove: (id) => http.del(`/pdf-schedule/uploads/${id}`),
   entries: (params) => http.get('/pdf-schedule/entries', params),
   options: () => http.get('/pdf-schedule/options'),
+}
+
+/* ⑮ 地址中心（书签） */
+export const bookmarkApi = {
+  list: (params) => http.get('/bookmarks', params),
+  create: (payload) => http.post('/bookmarks', payload),
+  update: (id, payload) => http.put(`/bookmarks/${id}`, payload),
+  click: (id) => http.post(`/bookmarks/${id}/click`),
+  remove: (id) => http.del(`/bookmarks/${id}`),
+}
+
+/* ⑯ 新闻资讯 */
+export const newsApi = {
+  items: (params) => http.get('/news/items', params),
+  categories: () => http.get('/news/categories'),
+  detail: (id) => http.get(`/news/items/${id}`),
+  setRead: (id, isRead) => http.post(`/news/items/${id}/read`, undefined, { is_read: isRead }),
+  setStar: (id, starred) => http.post(`/news/items/${id}/star`, undefined, { is_starred: starred }),
+  remove: (id) => http.del(`/news/items/${id}`),
+  crawl: (force = false) => http.post('/news/crawl', undefined, { force }),
+  crawlStatus: () => http.get('/news/crawl/status'),
+  logs: (limit = 10) => http.get('/news/logs', { limit }),
+  sources: () => http.get('/news/sources'),
+  createSource: (payload) => http.post('/news/sources', payload),
+  updateSource: (id, payload) => http.put(`/news/sources/${id}`, payload),
+  removeSource: (id) => http.del(`/news/sources/${id}`),
 }
 
 /* ⑬ 微信订阅消息 */

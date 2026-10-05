@@ -16,3 +16,19 @@ class ChatIn(BaseModel):
 class ToolCallIn(BaseModel):
     name: str = Field(description="工具名，见 GET /ai/tools")
     arguments: dict = Field(default_factory=dict)
+
+
+class LlmCfgIn(BaseModel):
+    base_url: str | None = Field(default=None, max_length=200)
+    api_key: str | None = Field(default=None, max_length=200, description="留空/不传=保持原值")
+    model: str | None = Field(default=None, max_length=80)
+    vl_model: str | None = Field(default=None, max_length=80)
+    timeout: int | None = Field(default=None, ge=5, le=600)
+    quota: int | None = Field(default=None, ge=0, description="Token 预算，0=不限")
+
+
+class LlmTestIn(BaseModel):
+    base_url: str | None = None
+    api_key: str | None = None
+    model: str | None = None
+    timeout: int | None = None

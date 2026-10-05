@@ -11,8 +11,8 @@
 import { computed, reactive } from 'vue'
 import router from '../router'
 import {
-  aiApi, authApi, classroomApi, clearAuth, coursesApi, dashboardApi, financeApi, getCachedUser,
-  getToken, healthApi, kaoyanApi, knowledgeApi, pdfScheduleApi, setCachedUser, setToken, studyApi, systemApi,
+  aiApi, authApi, bookmarkApi, classroomApi, clearAuth, coursesApi, dashboardApi, financeApi, getCachedUser,
+  getToken, healthApi, kaoyanApi, knowledgeApi, newsApi, pdfScheduleApi, setCachedUser, setToken, studyApi, systemApi,
   tasksApi, wechatApi,
 } from '../api'
 
@@ -30,6 +30,8 @@ export const store = reactive({
   profile: { name: '—', school: '—', role: '—', avatar: '北' },
   runtime: null,
   aiStatus: null,
+  /* Token 真实用量（来自后端 ai_usage 台账，非估算展示） */
+  tokenSummary: null,
   wx: { status: null, quota: null, logs: [] },
 
   /* ── 视图数据（与原型同结构）── */
@@ -48,6 +50,10 @@ export const store = reactive({
     weekNewTrend: [], hotTags: [], ragCount: 0, chunkCount: 0, coverage: 0,
   },
   newsFeed: [],
+  /* 地址中心（书签） */
+  bookmarks: { items: [], categories: [], loading: false },
+  /* 新闻资讯 */
+  news: { items: [], categories: [], total: 0, loading: false, crawling: false, logs: [], sources: [] },
   weekTimetable: emptyTimetable(),
   notes: [],
   noteStats: {
@@ -56,7 +62,7 @@ export const store = reactive({
   },
   classroom: {
     matrix: { hours: [], days: [], cells: [] },
-    predict: [], records: [], room: null, overview: [],
+    predict: [], predictHint: '', records: [], room: null, overview: [],
     usage: { building: '', hours: [], rooms: [] }, usageLoading: false,
     campus: { hours: [], buildings: [] }, campusLoading: false,
     schedule: { total: 0, total_slots: 0, room_locations: 0, items: [] },
@@ -69,17 +75,14 @@ export const store = reactive({
     school: '—', major: '—', examDate: null, totalTarget: 0, totalCurrent: 0,
     subjects: [], phases: [], dailyTasks: [], weeklyReview: '', focusSubjects: [],
   },
+  // 考研情报（聚焦爬虫：历年分数线 / 复试 / 就业），整体替换，视图用 computed 引用
+  kaoyanIntel: { loading: false, loaded: false, data: null },
   knowledgeDocs: [],
   folders: [],
   foldersRaw: [],
   semesters: [],
   semesterRaw: [],
   classroomRooms: [],
-  ragDemo: {
-    question: '时间片轮转和优先级调度有什么区别？',
-    answer: '输入问题后点击「提问」，将调用后端 RAG（切片检索 + DeepSeek 生成）基于你的知识库作答，并返回引用来源。',
-    refs: [],
-  },
   finance: {
     month: '', income: 0, expense: 0, studyExpense: 0, studyRatio: 0, balance: 0,
     categories: [], trend: { months: [], expense: [], study: [], income: [] },
@@ -97,6 +100,29 @@ export const store = reactive({
     accentPresets: [
       { name: '极光绿', value: '#4ade80' }, { name: '深海蓝', value: '#60a5fa' },
       { name: '赛博紫', value: '#c084fc' }, { name: '落日橙', value: '#fb923c' },
+    ],
+    /* ── 背景外观（「系统设置 → 背景外观」可自主配置） ── */
+    appearance: {
+      preset: 'aurora',      // 光晕配色预设 key
+      glow: 100,             // 光晕强度 %（0~160）
+      bgColor: '#070a08',    // 背景底色
+      wallpaper: '',         // 自定义壁纸（dataURL，仅存本机）
+      wallpaperDim: 45,      // 壁纸压暗 %（0~90）
+      grid: 0,               // 网格纹理强度 %（0~40）
+      radius: 18,            // 卡片圆角 px（8~26）
+    },
+    /* 背景光晕预设：三束光的位置/颜色固定，颜色可换 */
+    bgPresets: [
+      { key: 'aurora', name: '极光墨绿', hint: '默认：绿 + 冷蓝补光',
+        glow: ['rgba(74,222,128,0.13)', 'rgba(74,222,128,0.09)', 'rgba(96,165,250,0.05)'] },
+      { key: 'ocean', name: '深海蓝', hint: '冷静偏蓝，适合长时间阅读',
+        glow: ['rgba(96,165,250,0.14)', 'rgba(56,189,248,0.09)', 'rgba(74,222,128,0.05)'] },
+      { key: 'neon', name: '赛博紫', hint: '紫 + 品红，科技感更强',
+        glow: ['rgba(192,132,252,0.14)', 'rgba(244,114,182,0.09)', 'rgba(96,165,250,0.06)'] },
+      { key: 'sunset', name: '落日橙', hint: '暖橙光晕，夜间更柔和',
+        glow: ['rgba(251,146,60,0.13)', 'rgba(251,191,36,0.08)', 'rgba(248,113,113,0.05)'] },
+      { key: 'mono', name: '纯黑无光', hint: '关闭光晕，极致纯净',
+        glow: ['rgba(255,255,255,0.00)', 'rgba(255,255,255,0.00)', 'rgba(255,255,255,0.00)'] },
     ],
     weatherCity: '武汉',
     dataSource: '—',
@@ -161,7 +187,7 @@ export const store = reactive({
       me, summary, week, taskList, taskStats, study14, plans, planTasks,
       kbStats, docs, folders, buildings, finSummary, finTrend, finBudgets, finRecords,
       healthReport, healthSettings, healthRecords, runtime, classroomRecent,
-      wxStatus, wxQuota, wxLogs, aiStatus,
+      wxStatus, wxQuota, wxLogs, aiStatus, tokenUsage,
     ] = await Promise.all([
       safe('用户信息', () => authApi.me()),
       safe('总览', () => dashboardApi.summary(7)),
@@ -188,6 +214,7 @@ export const store = reactive({
       safe('订阅配额', () => wechatApi.quota()),
       safe('推送日志', () => wechatApi.logs(5)),
       safe('AI 状态', () => aiApi.status()),
+      safe('Token 用量', () => aiApi.usage()),
     ])
 
     composeIdentity(me, runtime)
@@ -203,11 +230,14 @@ export const store = reactive({
     composeFinance(finSummary, finTrend, finBudgets, finRecords)
     composeHealth(healthReport, healthSettings, healthRecords, study14)
     composeAiAndStatus(summary, taskList, runtime, wxStatus, wxQuota, wxLogs, aiStatus)
+    if (tokenUsage) store.tokenSummary = tokenUsage
 
     store.errors = errors
     store.loading = false
     store.ready = true
     applyAccent(store.settings.accent)
+    loadLocalWallpaper()      // 本机壁纸 → appearance
+    applyAppearance()         // 应用背景外观（预设/强度/底色/网格/圆角/壁纸）
 
     // 教室热力图需要按教室单独查询（二次请求）
     void composeClassroomMatrix(buildings)
@@ -267,6 +297,104 @@ export const store = reactive({
     store.newsFeed.unshift({ time: '刚刚', tone, tag, text })
   },
 
+  /* ── Token 用量（真实台账）── */
+  async loadTokenUsage() {
+    try {
+      store.tokenSummary = await aiApi.usage()
+    } catch { /* 离线时保留上次值 */ }
+    return store.tokenSummary
+  },
+  /** 流式对话 done 事件直接带回最新汇总，免二次请求 */
+  applyTokenSummary(summary) {
+    if (summary && typeof summary.total_tokens === 'number') store.tokenSummary = summary
+  },
+
+  /* ── 个人资料（头像窗口内自定义）── */
+  userRaw: null,
+  async updateProfile(payload) {
+    const user = await authApi.updateMe(payload)
+    setCachedUser(user)
+    await store.refresh()
+    return user
+  },
+  async updateProfileConfig(config) {
+    await authApi.updateConfig(config, true)
+    await store.refresh()
+  },
+
+  /* ── 地址中心 ── */
+  async loadBookmarks(params = {}) {
+    store.bookmarks.loading = true
+    try {
+      const data = await bookmarkApi.list(params)
+      store.bookmarks.items = data?.items || []
+      store.bookmarks.categories = data?.categories || []
+      return store.bookmarks.items
+    } finally {
+      store.bookmarks.loading = false
+    }
+  },
+  async createBookmark(payload) {
+    const b = await bookmarkApi.create(payload)
+    await store.loadBookmarks()
+    return b
+  },
+  async updateBookmark(id, payload) {
+    const b = await bookmarkApi.update(id, payload)
+    await store.loadBookmarks()
+    return b
+  },
+  async removeBookmark(id) {
+    const r = await bookmarkApi.remove(id)
+    await store.loadBookmarks()
+    return r
+  },
+  async clickBookmark(id) {
+    try { await bookmarkApi.click(id) } catch { /* 计数失败不影响打开 */ }
+  },
+
+  /* ── 新闻资讯 ── */
+  async loadNews(params = {}) {
+    store.news.loading = true
+    try {
+      const [list, cats] = await Promise.all([newsApi.items(params), newsApi.categories()])
+      store.news.items = list?.items || []
+      store.news.total = list?.total || 0
+      store.news.categories = cats?.items || []
+      return store.news.items
+    } finally {
+      store.news.loading = false
+    }
+  },
+  async newsCrawl(force = false) {
+    const r = await newsApi.crawl(force)
+    if (r?.started) store.news.crawling = true
+    return r
+  },
+  async newsCrawlStatus() {
+    const s = await newsApi.crawlStatus()
+    store.news.crawling = !!s?.running
+    if (!s?.running) {
+      await store.loadNews({ limit: 60 })
+      store.news.logs = (await newsApi.logs(8))?.items || []
+    }
+    return s
+  },
+  async loadNewsSources() {
+    store.news.sources = (await newsApi.sources())?.items || []
+    return store.news.sources
+  },
+  async newsSetRead(id, isRead) {
+    await newsApi.setRead(id, isRead)
+    const it = store.news.items.find((x) => x.id === id)
+    if (it) it.is_read = isRead
+  },
+  async newsSetStar(id, starred) {
+    await newsApi.setStar(id, starred)
+    const it = store.news.items.find((x) => x.id === id)
+    if (it) it.is_starred = starred
+  },
+
   async setAccent(color) {
     store.settings.accent = color
     applyAccent(color)
@@ -277,6 +405,53 @@ export const store = reactive({
     }
   },
 
+  /**
+   * 更新背景外观（局部字段合并）。
+   * 立即生效并写入账号配置；壁纸体积大，单独存本机 localStorage。
+   * @param {object} patch 如 { preset:'ocean', glow:120, bgColor:'#05070a', grid:20, radius:14 }
+   */
+  async setAppearance(patch = {}) {
+    store.settings.appearance = { ...store.settings.appearance, ...patch }
+    applyAppearance()
+    // 只把可序列化的轻量字段同步到后端（排除壁纸 dataURL）
+    const { wallpaper, ...rest } = store.settings.appearance
+    try {
+      await authApi.updateConfig({ appearance: rest }, true)
+    } catch {
+      /* 离线时仅本地生效 */
+    }
+    return store.settings.appearance
+  },
+
+  /**
+   * 设置自定义壁纸（传空字符串则清除）。
+   * @param {string} dataUrl 图片 dataURL
+   */
+  async setWallpaper(dataUrl) {
+    store.settings.appearance.wallpaper = dataUrl || ''
+    try {
+      if (dataUrl) localStorage.setItem(WALLPAPER_KEY, dataUrl)
+      else localStorage.removeItem(WALLPAPER_KEY)
+    } catch {
+      /* 超配额时仅本次会话生效 */
+    }
+    applyAppearance()
+    return store.settings.appearance.wallpaper
+  },
+
+  /** 恢复默认背景外观（含清除壁纸） */
+  async resetAppearance() {
+    store.settings.appearance = {
+      preset: 'aurora', glow: 100, bgColor: '#070a08',
+      wallpaper: '', wallpaperDim: 45, grid: 0, radius: 18,
+    }
+    try { localStorage.removeItem(WALLPAPER_KEY) } catch { /* 忽略 */ }
+    applyAppearance()
+    const { wallpaper, ...rest } = store.settings.appearance
+    try { await authApi.updateConfig({ appearance: rest }, true) } catch { /* 忽略 */ }
+    return store.settings.appearance
+  },
+
   async setWeatherCity(city) {
     store.weather.city = city
     store.settings.weatherCity = city
@@ -285,6 +460,18 @@ export const store = reactive({
       await authApi.updateConfig({ weather_city: city }, true)
     } catch {
       /* 忽略 */
+    }
+  },
+
+  /** 考研情报：聚焦爬虫抓取目标院校分数线/就业（force=重新抓取） */
+  async loadKaoyanIntel(force = false) {
+    if (store.kaoyanIntel.loading) return
+    store.kaoyanIntel = { ...store.kaoyanIntel, loading: true }
+    try {
+      const data = await kaoyanApi.intel(force)
+      store.kaoyanIntel = { loading: false, loaded: true, data: data || null }
+    } catch {
+      store.kaoyanIntel = { loading: false, loaded: true, data: null }
     }
   },
 
@@ -631,12 +818,21 @@ export const store = reactive({
     return store.knowledgeDocs
   },
 
-  /** 加载全校使用状态（每楼一张 楼层×教室序号 图） */
-  async loadCampusUsage() {
+  /**
+   * 加载全校使用状态（每楼一张 楼层×教室序号 图）
+   * @param {{on_date?: string, week?: number}} opts
+   *   on_date：查询日期 YYYY-MM-DD（后端按该日期所在教学周精确匹配课表周次）
+   *   week：直接指定教学周（优先于日期）
+   */
+  async loadCampusUsage(opts = {}) {
     store.classroom.campusLoading = true
     try {
-      const data = await classroomApi.campusUsage()
-      store.classroom.campus = { hours: data.hours || [], buildings: data.buildings || [] }
+      const data = await classroomApi.campusUsage(opts)
+      store.classroom.campus = {
+        hours: data.hours || [],
+        buildings: data.buildings || [],
+        semester: data.semester || null,
+      }
       return data
     } finally {
       store.classroom.campusLoading = false
@@ -644,14 +840,15 @@ export const store = reactive({
   },
 
   /** 加载某教学楼全部教室的使用状态图（每间一张） */
-  async loadBuildingUsage(building) {
+  async loadBuildingUsage(building, opts = {}) {
     store.classroom.usageLoading = true
     try {
-      const data = await classroomApi.buildingUsage(building)
+      const data = await classroomApi.buildingUsage(building, opts)
       store.classroom.usage = {
         building: data.building,
         hours: data.hours || [],
         rooms: data.rooms || [],
+        semester: data.semester || null,
       }
       return data
     } finally {
@@ -749,8 +946,8 @@ export const store = reactive({
   },
 
   /** 某教室指定时段使用详情（点击格子弹窗） */
-  roomUsageAt(building, roomNo, day, hour) {
-    return classroomApi.usageAt(building, roomNo, day, hour)
+  roomUsageAt(building, roomNo, day, hour, week) {
+    return classroomApi.usageAt(building, roomNo, day, hour, week)
   },
 
   /* ───────────── ⑭ PDF 教室课表 ───────────── */
@@ -796,8 +993,47 @@ function applyAccent(color) {
   document.documentElement.style.setProperty('--accent', color || '#4ade80')
 }
 
+/** 壁纸 dataURL 仅存本机（体积大，不写账号配置） */
+const WALLPAPER_KEY = 'pl_wallpaper'
+
+/**
+ * 应用背景外观到 CSS 变量。
+ * 说明：壁纸 + 压暗遮罩合成为一条 background-image，保证遮罩只作用于壁纸而压不到光晕。
+ */
+function applyAppearance() {
+  const a = store.settings.appearance
+  const preset = store.settings.bgPresets.find((p) => p.key === a.preset) || store.settings.bgPresets[0]
+  const root = document.documentElement.style
+
+  root.setProperty('--glow-1', preset.glow[0])
+  root.setProperty('--glow-2', preset.glow[1])
+  root.setProperty('--glow-3', preset.glow[2])
+  root.setProperty('--glow-opacity', String(Math.max(0, (a.glow ?? 100) / 100)))
+  root.setProperty('--bg', a.bgColor || '#070a08')
+  root.setProperty('--grid-opacity', String(Math.max(0, (a.grid ?? 0) / 100)))
+  root.setProperty('--radius', `${a.radius ?? 18}px`)
+
+  // 壁纸：有则合成「压暗遮罩 + 图片」，无则置 none
+  if (a.wallpaper) {
+    const dim = Math.min(90, Math.max(0, a.wallpaperDim ?? 45)) / 100
+    root.setProperty('--wp-image',
+      `linear-gradient(rgba(0,0,0,${dim}), rgba(0,0,0,${dim})), url("${a.wallpaper}")`)
+  } else {
+    root.setProperty('--wp-image', 'none')
+  }
+}
+
+/** 读取本机壁纸并合入 appearance（启动时调用） */
+function loadLocalWallpaper() {
+  try {
+    const wp = localStorage.getItem(WALLPAPER_KEY)
+    if (wp) store.settings.appearance.wallpaper = wp
+  } catch { /* 隐私模式等忽略 */ }
+}
+
 function composeIdentity(me, runtime) {
   if (me) {
+    store.userRaw = me
     const config = me.config || {}
     store.profile = {
       name: me.nickname || me.username,
@@ -807,6 +1043,10 @@ function composeIdentity(me, runtime) {
     }
     store.settings.accent = config.accent || store.settings.accent
     store.settings.weatherCity = config.weather_city || store.settings.weatherCity
+    // 背景外观：账号配置优先，缺失字段保留默认
+    if (config.appearance && typeof config.appearance === 'object') {
+      store.settings.appearance = { ...store.settings.appearance, ...config.appearance }
+    }
   }
   if (runtime) {
     store.runtime = runtime
@@ -1138,7 +1378,11 @@ async function composeClassroomMatrix(buildings) {
       last: `${r.last_status === 'free' ? '空闲' : '占用'} · ${(r.last_recorded_at || '').slice(5, 16)}`,
       trend: r.confidence > 70 ? 'up' : 'flat',
     }))
+    // 无样本时后端会给出原因（如"该时段暂无历史快照"），前端据此渲染空状态
+    store.classroom.predictHint = predict.hint || ''
   } catch {
+    store.classroom.predict = []
+    store.classroom.predictHint = ''
     /* 无采集数据时保持空矩阵 */
   }
 }
@@ -1317,3 +1561,7 @@ function composeAiAndStatus(summary, taskList, runtime, wxStatus, wxQuota, wxLog
     }
   }, 0)
 }
+
+/* 启动即应用背景外观（含本机壁纸），登录页也能看到自定义效果 */
+loadLocalWallpaper()
+applyAppearance()

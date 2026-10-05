@@ -56,6 +56,13 @@ async def lifespan(app: FastAPI):
         logger.info("数据库就绪：engine=%s backend=%s", status["engine"], status["backend"])
         if status["engine"] == "sqlite" and settings.DB_BACKEND.lower() == "mysql":
             logger.warning("MySQL 不可用，已自动回退 SQLite（数据文件见 SQLITE_PATH）")
+        # 历史数据迁移：修正新闻条目中的坏图片 URL（幂等）
+        from app.core.database import session_scope
+        from app.services import news_service
+        with session_scope() as _db:
+            n = news_service.normalize_existing_images(_db)
+            if n:
+                logger.info("新闻图片 URL 迁移：修正 %d 条", n)
     except Exception as exc:                     # pragma: no cover
         logger.exception("初始化数据库失败：%s", exc)
     logger.info("缓存模式：%s | AI 模式：%s | 微信推送：%s", cache.mode,

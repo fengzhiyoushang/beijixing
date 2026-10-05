@@ -8,9 +8,13 @@ import { countdown } from '../utils/format'
 
 const message = useMessage()
 const k = computed(() => store.kaoyan)
+const intel = computed(() => store.kaoyanIntel.data)
 const now = ref(Date.now())
 let timer = null
-onMounted(() => { timer = setInterval(() => (now.value = Date.now()), 1000) })
+onMounted(() => {
+  timer = setInterval(() => (now.value = Date.now()), 1000)
+  if (!store.kaoyanIntel.loaded && !store.kaoyanIntel.loading) store.loadKaoyanIntel()
+})
 onUnmounted(() => clearInterval(timer))
 
 const cd = computed(() => (k.value.examDate ? countdown(k.value.examDate, now.value) : { text: '待设定', overdue: false }))
@@ -57,6 +61,125 @@ const phaseOption = computed(() => ({
 const tasks = ref(store.kaoyan.dailyTasks.map((t) => ({ ...t })))
 const doneMinutes = computed(() => tasks.value.filter((t) => t.done).reduce((s, t) => s + t.minutes, 0))
 const totalMinutes = computed(() => tasks.value.reduce((s, t) => s + t.minutes, 0))
+
+/* ── 考研情报（聚焦爬虫）：历年分数线 / 复试 / 就业 ── */
+const PIE_PALETTE = ['#4ade80', '#60a5fa', '#c084fc', '#facc15', '#f87171', '#2dd4bf']
+
+/* 分数线趋势：国家线/复试线折线 + 录取最高/最低区间柱 */
+const lineOption = computed(() => {
+  const lines = intel.value?.score_lines || []
+  return {
+    grid: { left: 40, right: 16, top: 30, bottom: 24 },
+    legend: { data: ['复试线', '录取最低分', '录取最高分'], textStyle: { color: '#9ca3af', fontSize: 10.5 }, top: 0, right: 0 },
+    xAxis: { type: 'category', data: lines.map((l) => `${l.year}`), ...axisBase(), splitLine: { show: false } },
+    yAxis: { type: 'value', min: 240, ...axisBase() },
+    tooltip: { trigger: 'axis', backgroundColor: '#1e1e1e', borderColor: '#2a2a2a', textStyle: { color: '#e5e7eb', fontSize: 12 } },
+    series: [
+      { name: '复试线', ...glowLine('#f87171'), data: lines.map((l) => l.line), symbolSize: 6 },
+      { name: '录取最低分', ...glowLine('#fbbf24'), data: lines.map((l) => l.min), symbolSize: 6 },
+      { name: '录取最高分', ...glowLine('#4ade80'), data: lines.map((l) => l.max), symbolSize: 6 },
+    ],
+  }
+})
+
+/* 行业分布环形图 */
+const industryOption = computed(() => {
+  const ind = intel.value?.employment?.industry || []
+  return {
+    tooltip: { trigger: 'item', backgroundColor: '#1e1e1e', borderColor: '#2a2a2a', textStyle: { color: '#e5e7eb', fontSize: 12 }, formatter: '{b}<br/>占比约 {c}%' },
+    series: [{
+      type: 'pie', radius: ['46%', '70%'], center: ['50%', '46%'],
+      itemStyle: { borderColor: '#1e1e1e', borderWidth: 2 },
+      label: { show: true, color: '#9ca3af', fontSize: 10, formatter: '{b}\n{c}%' },
+      labelLine: { length: 6, length2: 8 },
+      data: ind.map((c, i) => ({
+        name: c.name, value: c.share,
+        itemStyle: { color: PIE_PALETTE[i % PIE_PALETTE.length], shadowColor: PIE_PALETTE[i % PIE_PALETTE.length] + '88', shadowBlur: 10 },
+      })),
+    }],
+  }
+})
+
+const singleLine = computed(() => {
+  const sl = intel.value?.single_line || {}
+  const years = Object.keys(sl).sort()
+  const y = years[years.length - 1]
+  return y ? { year: y, ...sl[y] } : null
+})
+
+/* ── 情报可用性：分块判断，任一模块有数据即渲染（避免一个模块缺失导致整页空白）── */
+const intelReady = computed(() => !!intel.value && intel.value.available === true)
+const hasScoreLines = computed(() => (intel.value?.score_lines?.length || 0) > 0)
+const hasRetest = computed(() => {
+  const r = intel.value?.retest
+  return !!r && (!!r.formula || (r.content?.length || 0) > 0)
+})
+const hasEmployment = computed(() => {
+  const e = intel.value?.employment
+  return !!e && ((e.industry?.length || 0) > 0
+    || (e.companies?.length || 0) > 0
+    || (e.positions?.length || 0) > 0
+    || (e.rate_3y?.length || 0) > 0)
+})
+
+/* 目标卡内"录取情报速览"条：取最新一年的分数线数据 */
+const intelSummary = computed(() => {
+  const it = intel.value
+  if (!it || !it.available || !it.score_lines || !it.score_lines.length) return null
+  const latest = [...it.score_lines].sort((a, b) => b.year - a.year)[0]
+  // 无录取最低分时以当年复试线为参照（国家线兜底院校）
+  const minAdmit = latest.min ?? it.retest?.min_admitted?.[String(latest.year)] ?? latest.line
+  if (latest.line == null) return null
+  const rates = it.employment?.rate_3y || []
+  const empRate = rates.length ? rates[rates.length - 1].rate : null
+  return {
+    year: latest.year,
+    line: latest.line,
+    minAdmit,
+    minIsLine: latest.min == null && it.retest?.min_admitted?.[String(latest.year)] == null,
+    gapToMin: minAdmit - (k.value.totalCurrent || 0),
+    admit: latest.admit ?? '—',
+    empRate,
+  }
+})
+
+/* 剩余天数与每日提分测算（填充目标卡留白） */
+const daysLeft = computed(() => {
+  if (!k.value.examDate) return null
+  const d = Math.ceil((new Date(k.value.examDate).getTime() - now.value) / 86400000)
+  return d > 0 ? d : 0
+})
+const sprint = computed(() => {
+  const s = intelSummary.value
+  if (!s || !daysLeft.value) return null
+  const gap = s.minAdmit - (k.value.totalCurrent || 0)
+  return { ok: gap <= 0, gap, days: daysLeft.value, perDay: gap > 0 ? (gap / daysLeft.value).toFixed(2) : '0' }
+})
+
+/* 目标卡内迷你趋势图：历年复试线 + 当前预估参考线 */
+const miniTrendOption = computed(() => {
+  const lines = [...(intel.value?.score_lines || [])].sort((a, b) => a.year - b.year)
+  return {
+    grid: { left: 34, right: 12, top: 16, bottom: 20 },
+    xAxis: { type: 'category', data: lines.map((l) => `${l.year}`), ...axisBase(), splitLine: { show: false }, axisLabel: { color: '#6b7280', fontSize: 10 } },
+    yAxis: { type: 'value', min: 240, ...axisBase(), axisLabel: { color: '#6b7280', fontSize: 10 } },
+    tooltip: { trigger: 'axis', backgroundColor: '#1e1e1e', borderColor: '#2a2a2a', textStyle: { color: '#e5e7eb', fontSize: 11 } },
+    series: [{
+      ...glowLine('#f87171'), data: lines.map((l) => l.line), symbolSize: 5,
+      areaStyle: { opacity: 0.08 },
+      markLine: {
+        silent: true, symbol: 'none', lineStyle: { color: '#60a5fa', type: 'dashed', width: 1 },
+        label: { color: '#60a5fa', fontSize: 9.5, formatter: '当前预估' },
+        data: [{ yAxis: k.value.totalCurrent }],
+      },
+    }],
+  }
+})
+
+function fmtCrawled(iso) {
+  if (!iso) return '—'
+  return iso.replace('T', ' ').slice(0, 16)
+}
 
 // 勾选状态写回后端（/kaoyan/plan/tasks/{id}），并同步刷新
 async function toggleTask(i) {
@@ -274,6 +397,7 @@ async function saveGoal() {
     })
     message.success('目标已保存，差距分析与阶段计划已同步更新')
     showGoal.value = false
+    store.loadKaoyanIntel(true)   // 目标院校/专业已变更，重新抓取情报
   } catch (err) {
     message.error(err.message)
   } finally {
@@ -289,6 +413,9 @@ async function saveGoal() {
       <span class="sub mono">STRATEGY · {{ k.school }} {{ k.major }}</span>
       <span class="spacer" />
       <span v-if="!k.hasTarget" class="chip chip-yellow">尚未录入目标 · 请先设定</span>
+      <NButton size="small" secondary type="primary" :loading="store.kaoyanIntel.loading" @click="store.loadKaoyanIntel(true)">
+        ↻ 刷新情报
+      </NButton>
       <NButton size="small" type="primary" ghost @click="openGoal">
         {{ k.hasTarget ? '编辑目标' : '录入目标' }}
       </NButton>
@@ -321,6 +448,73 @@ async function saveGoal() {
               <span class="ts-gap mono" :class="g.gap > 40 ? 'red' : g.gap > 25 ? 'yellow' : 'green'">
                 差 {{ g.gap }}
               </span>
+            </div>
+          </div>
+
+          <!-- 录取情报速览（聚焦爬虫抓取院校公开数据，填充卡片留白） -->
+          <div v-if="intelSummary" class="intel-strip">
+            <div class="is-item">
+              <span class="label-3">{{ intelSummary.year }} 复试线</span>
+              <b class="mono is-red">{{ intelSummary.line }}</b>
+            </div>
+            <span class="is-sep" />
+            <div class="is-item">
+              <span class="label-3">{{ intelSummary.minIsLine ? `${intelSummary.year} 复试线（参照）` : '去年录取最低分' }}</span>
+              <b class="mono is-yellow">{{ intelSummary.minAdmit }}</b>
+            </div>
+            <span class="is-sep" />
+            <div class="is-item">
+              <span class="label-3">当前预估距{{ intelSummary.minIsLine ? '复试线' : '最低分' }}</span>
+              <b class="mono" :class="intelSummary.gapToMin > 0 ? 'is-red' : 'is-green'">
+                {{ intelSummary.gapToMin > 0 ? `差 ${intelSummary.gapToMin}` : `超 ${-intelSummary.gapToMin}` }}
+              </b>
+            </div>
+            <template v-if="intelSummary.admit !== '—'">
+              <span class="is-sep" />
+              <div class="is-item">
+                <span class="label-3">去年一志愿录取</span>
+                <b class="mono">{{ intelSummary.admit }} 人</b>
+              </div>
+            </template>
+            <template v-if="intelSummary.empRate != null">
+              <span class="is-sep" />
+              <div class="is-item">
+                <span class="label-3">学院就业率</span>
+                <b class="mono is-green">{{ intelSummary.empRate }}%</b>
+              </div>
+            </template>
+            <div class="is-src mono">数据来源：{{ intel.source }} · 采集 {{ fmtCrawled(intel.crawled_at) }}</div>
+          </div>
+          <!-- 迷你趋势 + 冲刺测算（填充卡片下部空间） -->
+          <div v-if="intelSummary" class="t-sprint">
+            <div class="sp-chart">
+              <div class="label-3" style="margin-bottom:2px">历年复试线走势</div>
+              <GlowChart :option="miniTrendOption" height="128px" />
+            </div>
+            <div v-if="sprint" class="sp-metrics">
+              <div class="sp-item">
+                <span class="label-3">剩余天数</span>
+                <b class="mono">{{ sprint.days }} 天</b>
+              </div>
+              <div class="sp-item">
+                <span class="label-3">{{ sprint.ok ? '状态' : '每日需提分' }}</span>
+                <b class="mono" :class="sprint.ok ? 'is-green' : 'is-yellow'">
+                  {{ sprint.ok ? '已过参照线' : `+${sprint.perDay} 分` }}
+                </b>
+              </div>
+              <div class="sp-tip mono">
+                {{ sprint.ok
+                  ? '当前预估已超过参照线，稳住节奏、向更高目标分冲刺'
+                  : `距参照线还差 ${sprint.gap} 分 · 按 4 科均摊，每天多拿 ${sprint.perDay} 分即可追平` }}
+              </div>
+            </div>
+          </div>
+          <!-- 无情报时的占位提示（引导刷新，避免卡片空洞） -->
+          <div v-else-if="!store.kaoyanIntel.loading" class="intel-empty">
+            <div class="ie-icon">◌</div>
+            <div class="ie-text">
+              暂无「{{ k.school }} · {{ k.major }}」的院校情报<br>
+              点击右上角 <b>↻ 刷新情报</b> 通过爬虫抓取该校公开数据（历年分数线 / 复试规则 / 就业），抓取结果自动存入数据库，随时可查看
             </div>
           </div>
         </div>
@@ -358,6 +552,115 @@ async function saveGoal() {
             </NPopconfirm>
           </div>
         </div>
+      </section>
+    </div>
+
+    <!-- ── 考研情报：历年分数线 / 复试 / 就业（聚焦爬虫抓取） ── -->
+    <div v-if="store.kaoyanIntel.loading && !intel" class="grid" style="margin-bottom: 16px">
+      <section class="col-12 card intel-loading mono">◌ 正在抓取目标院校公开数据（分数线 / 复试 / 就业）…</section>
+    </div>
+    <template v-if="intelReady">
+      <div v-if="hasScoreLines || hasRetest" class="grid" style="margin-bottom: 16px">
+        <section v-if="hasScoreLines" class="col-8 card">
+          <header class="card-head">
+            <div class="card-title">◔ 历年录取分数线 <span class="en">CUTOFF HISTORY</span></div>
+            <div style="display:flex; gap:8px; align-items:center">
+              <span class="chip chip-blue mono">{{ intel.major_code }} · {{ intel.degree }}</span>
+              <NButton size="tiny" quaternary type="primary" :loading="store.kaoyanIntel.loading" @click="store.loadKaoyanIntel(true)">↻ 更新</NButton>
+            </div>
+          </header>
+          <GlowChart :option="lineOption" height="180px" />
+          <div class="sl-table">
+            <div class="sl-row sl-head mono">
+              <span>年份</span><span>复试线</span><span>类型</span><span>报考</span><span>录取</span><span>最高分</span><span>最低分</span><span>平均分</span>
+            </div>
+            <div v-for="l in intel.score_lines" :key="l.year" class="sl-row">
+              <span class="sl-year">{{ l.year }}</span>
+              <span class="sl-line">{{ l.line }}</span>
+              <span class="sl-type">{{ l.line_type }}</span>
+              <span>{{ l.report ?? '—' }}</span>
+              <span>{{ l.admit ?? '—' }}</span>
+              <span>{{ l.max ?? '—' }}</span>
+              <span class="sl-min">{{ l.min ?? '—' }}</span>
+              <span>{{ l.avg ?? '—' }}</span>
+            </div>
+          </div>
+          <div v-if="singleLine" class="single-line mono">
+            {{ singleLine.year }} 单科线（A类工学）：政治 ≥ {{ singleLine.politics }} · 外语 ≥ {{ singleLine.foreign }} · 业务课一 ≥ {{ singleLine.paper1 }} · 业务课二 ≥ {{ singleLine.paper2 }}
+            <span class="chip chip-accent" style="margin-left:6px">{{ intel.exam_subjects }}</span>
+          </div>
+          <div class="intel-src mono">来源：{{ intel.source }} · 采集 {{ fmtCrawled(intel.crawled_at) }}{{ intel.from_cache ? '（缓存）' : '' }}</div>
+        </section>
+
+        <section v-if="hasRetest" class="col-4 card" :class="{ 'col-12': !hasScoreLines }">
+          <header class="card-head"><div class="card-title">◈ 复试与录取规则 <span class="en">RETEST</span></div></header>
+          <div class="rt-formula mono">{{ intel.retest.formula }}</div>
+          <div class="rt-items">
+            <div v-for="it in intel.retest.content" :key="it.item" class="rt-item">
+              <span class="rt-name">{{ it.item }}</span>
+              <div class="rt-bar"><div class="rt-fill" :style="{ width: (it.score / 300 * 100) + '%' }" /></div>
+              <span class="rt-num mono">{{ it.score }}分</span>
+            </div>
+            <div v-if="!intel.retest.content?.length" class="rt-empty mono">该校未公布复试科目分值构成，以研究生院复试细则为准</div>
+          </div>
+          <div class="rt-rule">
+            <div class="rt-rule-row"><span class="label-3">差额比例</span><span>{{ intel.retest.ratio }}</span></div>
+            <div class="rt-rule-row"><span class="label-3">录取原则</span><span>{{ intel.retest.rule }}</span></div>
+            <div class="rt-rule-row"><span class="label-3">近年录取最低分</span>
+              <span class="mono">{{ Object.entries(intel.retest.min_admitted || {}).map(([y, v]) => `${y}:${v}`).join(' · ') || '—' }}</span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div v-if="hasEmployment" class="grid" style="margin-bottom: 16px">
+        <section class="col-5 card">
+          <header class="card-head">
+            <div class="card-title">◱ 行业分布与就业率 <span class="en">INDUSTRY</span></div>
+            <span v-if="intel.employment.rate_3y?.length" class="chip chip-accent">近3年平均 {{ (intel.employment.rate_3y.reduce((s, r) => s + r.rate, 0) / intel.employment.rate_3y.length).toFixed(1) }}%</span>
+            <span v-else-if="intel.employment.profile_label" class="chip chip-blue">{{ intel.employment.profile_label }}画像</span>
+          </header>
+          <GlowChart v-if="intel.employment.industry?.length" :option="industryOption" height="200px" />
+          <div v-if="intel.employment.rate_3y?.length" class="emp-rate-row">
+            <div v-for="r in intel.employment.rate_3y" :key="r.year" class="er-item">
+              <div class="er-year mono">{{ r.year }}</div>
+              <div class="er-rate mono" :style="{ color: r.rate >= 96 ? '#4ade80' : '#fbbf24' }">{{ r.rate }}%</div>
+            </div>
+          </div>
+          <div class="intel-src mono">{{ intel.employment.salary_note }}</div>
+        </section>
+
+        <section class="col-7 card">
+          <header class="card-head"><div class="card-title">☰ 主要就业单位与岗位 <span class="en">EMPLOYERS</span></div></header>
+          <div class="emp-grid">
+            <div v-for="(c, ci) in (intel.employment.companies || [])" :key="c.name" class="emp-card">
+              <div class="emp-logo mono" :style="{ color: PIE_PALETTE[ci % PIE_PALETTE.length] }">{{ (c.name || '—').slice(0, 2) }}</div>
+              <div class="emp-mid">
+                <div class="emp-name">{{ c.name }}</div>
+                <div class="emp-roles mono">{{ c.roles }}</div>
+              </div>
+              <span class="chip">{{ c.industry }}</span>
+            </div>
+          </div>
+          <div v-if="intel.employment.positions?.length" class="pos-tags">
+            <span class="label-3" style="margin-right:6px">典型岗位</span>
+            <span v-for="p in intel.employment.positions" :key="p" class="chip chip-blue">{{ p }}</span>
+          </div>
+          <div class="intel-src mono">来源：{{ intel.source }} · 采集 {{ fmtCrawled(intel.crawled_at) }}{{ intel.employment.is_estimate ? ' · 就业画像为公开信息估算' : '' }}</div>
+        </section>
+      </div>
+    </template>
+
+    <!-- 情报不可用时的明确提示（不静默留白） -->
+    <div v-else-if="!store.kaoyanIntel.loading && intel && !intel.available" class="grid" style="margin-bottom: 16px">
+      <section class="col-12 card intel-miss">
+        <div class="im-title">◌ 暂未获取到该校情报</div>
+        <div class="im-reason">{{ intel.reason || '数据源暂不可用' }}</div>
+        <div v-if="intel.hint_sources?.length" class="im-hint mono">
+          可参考来源：{{ intel.hint_sources.join(' · ') }}
+        </div>
+        <NButton size="tiny" type="primary" ghost style="margin-top:10px"
+                 :loading="store.kaoyanIntel.loading" @click="store.loadKaoyanIntel(true)">↻ 重新抓取</NButton>
       </section>
     </div>
 
@@ -620,8 +923,8 @@ async function saveGoal() {
 .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
 .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 10px; }
 
-.target-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-.t-left { flex: 1; min-width: 0; }
+.target-card { display: flex; align-items: stretch; justify-content: space-between; gap: 20px; }
+.t-left { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-start; }
 .t-subjects { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
 .ts-row { display: flex; align-items: center; gap: 10px; }
 .ts-name { width: 84px; font-size: 12px; color: var(--text-2); flex-shrink: 0; }
@@ -630,6 +933,26 @@ async function saveGoal() {
 .ts-num { font-size: 11px; color: var(--text-3); width: 66px; text-align: right; }
 .ts-gap { font-size: 11px; width: 54px; text-align: right; }
 .ts-gap.red { color: var(--red); }
+
+/* 目标卡内录取情报速览条 */
+.intel-strip { margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--border); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.t-sprint { margin-top: 12px; display: flex; gap: 18px; align-items: stretch; flex-wrap: wrap; }
+.t-sprint .sp-chart { flex: 1.4; min-width: 240px; }
+.t-sprint .sp-metrics { flex: 1; min-width: 200px; display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,0.02); }
+.sp-item { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.sp-item b { font-size: 16px; }
+.sp-tip { font-size: 11px; color: var(--text-3); line-height: 1.7; }
+.intel-empty { margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--border); display: flex; align-items: flex-start; gap: 10px; color: var(--text-3); font-size: 12px; line-height: 1.8; }
+.intel-empty .ie-icon { font-size: 16px; color: var(--accent, #4ade80); animation: spin 3s linear infinite; }
+.intel-empty b { color: var(--text-1); }
+@keyframes spin { to { transform: rotate(360deg); } }
+.is-item { display: flex; flex-direction: column; gap: 2px; min-width: 76px; }
+.is-item b { font-size: 15px; font-weight: 700; color: var(--text-1); }
+.is-item b.is-red { color: var(--red); }
+.is-item b.is-yellow { color: var(--yellow); }
+.is-item b.is-green { color: var(--accent); }
+.is-sep { width: 1px; height: 26px; background: var(--border); }
+.is-src { flex-basis: 100%; font-size: 9.5px; color: var(--text-3); opacity: 0.8; margin-top: 2px; }
 .ts-gap.yellow { color: var(--yellow); }
 .ts-gap.green { color: var(--accent); }
 .t-school { font-size: 22px; font-weight: 700; margin-top: 6px; }
@@ -688,4 +1011,53 @@ async function saveGoal() {
 .ph-btn.del:hover { color: var(--red); border-color: rgba(248, 113, 113, 0.4); }
 
 .empty-task { padding: 26px 0; text-align: center; font-size: 11.5px; color: var(--text-3); }
+
+/* ── 考研情报卡片 ── */
+.intel-loading { padding: 22px; text-align: center; font-size: 11.5px; color: var(--text-3); }
+
+/* 情报不可用提示 */
+.intel-miss { text-align: center; padding: 22px 20px; }
+.im-title { font-size: 13.5px; color: var(--text-1); font-weight: 600; }
+.im-reason { margin-top: 6px; font-size: 12px; color: var(--text-2); }
+.im-hint { margin-top: 8px; font-size: 10.5px; color: var(--text-3); }
+.rt-empty { font-size: 11px; color: var(--text-3); padding: 6px 0; }
+.sl-table { margin-top: 10px; border-top: 1px solid var(--border); }
+.sl-row { display: grid; grid-template-columns: 52px 56px 1fr 52px 52px 58px 58px 64px; align-items: center; gap: 6px; padding: 6px 2px; font-size: 11.5px; color: var(--text-2); border-bottom: 1px dashed var(--border); }
+.sl-row:last-child { border-bottom: none; }
+.sl-head { color: var(--text-3); font-size: 10.5px; }
+.sl-year { font-weight: 600; color: var(--text-1); }
+.sl-line { color: var(--red); font-weight: 600; }
+.sl-type { font-size: 10.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl-min { color: var(--yellow); }
+.single-line { margin-top: 10px; font-size: 10.5px; color: var(--text-3); line-height: 1.8; }
+.intel-src { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 10px; color: var(--text-3); line-height: 1.7; }
+
+.rt-formula { font-size: 11px; color: var(--accent); line-height: 1.8; padding: 8px 10px; border-radius: 8px; background: rgba(74, 222, 128, 0.06); border: 1px solid rgba(74, 222, 128, 0.18); }
+.rt-items { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.rt-item { display: flex; align-items: center; gap: 10px; }
+.rt-name { width: 64px; font-size: 12px; color: var(--text-2); flex-shrink: 0; }
+.rt-bar { flex: 1; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.rt-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #60a5fa, #c084fc); box-shadow: 0 0 10px rgba(96, 165, 250, 0.5); }
+.rt-num { width: 44px; text-align: right; font-size: 11px; color: var(--text-3); }
+.rt-rule { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.rt-rule-row { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: var(--text-2); line-height: 1.6; }
+
+.emp-rate-row { display: flex; gap: 10px; margin-top: 10px; }
+.er-item { flex: 1; text-align: center; padding: 8px 4px; border-radius: 10px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); }
+.er-year { font-size: 10px; color: var(--text-3); }
+.er-rate { font-size: 15px; font-weight: 700; margin-top: 2px; }
+
+.emp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.emp-card { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); min-width: 0; transition: border-color 0.2s ease; }
+.emp-card:hover { border-color: rgba(74, 222, 128, 0.35); }
+.emp-logo { width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border); }
+.emp-mid { flex: 1; min-width: 0; }
+.emp-name { font-size: 12.5px; font-weight: 600; }
+.emp-roles { font-size: 10px; color: var(--text-3); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pos-tags { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+@media (max-width: 860px) {
+  .emp-grid { grid-template-columns: 1fr; }
+  .sl-row { grid-template-columns: 44px 48px 1fr 44px 44px 50px 50px 56px; }
+}
 </style>

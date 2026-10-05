@@ -9,6 +9,14 @@
   --border: rgba(255, 255, 255, 0.07);
   --border-strong: rgba(255, 255, 255, 0.12);
 
+  /* ── 背景外观（可在「系统设置 → 背景外观」自定义；由 JS 覆盖）── */
+  --glow-1: rgba(74, 222, 128, 0.13);   /* 左上主光晕 */
+  --glow-2: rgba(74, 222, 128, 0.09);   /* 右下辅光晕 */
+  --glow-3: rgba(96, 165, 250, 0.05);   /* 顶部冷色补光 */
+  --glow-opacity: 1;                    /* 光晕强度 0~1.6 */
+  --wp-image: none;                     /* 自定义壁纸（含压暗遮罩，由 JS 合成） */
+  --grid-opacity: 0;                    /* 网格纹理强度 */
+
   /* 强调色 */
   --accent: #4ade80;
   --accent-soft: rgba(74, 222, 128, 0.12);
@@ -36,22 +44,44 @@ body.is-desktop { --wctl-w: 142px; }
 
 html, body, #app { height: 100%; margin: 0; }
 body {
-  background: var(--bg);
+  background-color: var(--bg);
+  /* 壁纸 + 压暗遮罩由 JS 合成到 --wp-image（无壁纸时为 none） */
+  background-image: var(--wp-image, none);
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
   color: var(--text-1);
   font-family: "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", "Segoe UI", sans-serif;
   font-size: 14px;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.25s ease;
 }
 
-/* 背景柔光：左上 / 右下绿色光晕（固定层，不拦截鼠标） */
+/* 背景柔光：左上 / 右下 / 顶部冷色补光（固定层，不拦截鼠标）
+   颜色与强度由「系统设置 → 背景外观」控制 */
 body::before {
   content: '';
   position: fixed; inset: 0; z-index: 0; pointer-events: none;
   background:
-    radial-gradient(920px 520px at 18% -12%, rgba(74, 222, 128, 0.13), transparent 62%),
-    radial-gradient(760px 460px at 92% 112%, rgba(74, 222, 128, 0.09), transparent 62%),
-    radial-gradient(680px 340px at 52% -6%, rgba(96, 165, 250, 0.05), transparent 70%);
+    radial-gradient(920px 520px at 18% -12%, var(--glow-1), transparent 62%),
+    radial-gradient(760px 460px at 92% 112%, var(--glow-2), transparent 62%),
+    radial-gradient(680px 340px at 52% -6%, var(--glow-3), transparent 70%);
+  opacity: var(--glow-opacity, 1);
+  transition: opacity 0.25s ease;
+}
+
+/* 可选网格纹理（科技感底纹；默认关闭） */
+body::after {
+  content: '';
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+  opacity: var(--grid-opacity, 0);
+  transition: opacity 0.25s ease;
 }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }

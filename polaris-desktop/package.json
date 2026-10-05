@@ -4,16 +4,5 @@
   "private": true,
   "description": "北极星 · 个人战略终端 —— Electron 桌面版",
   "main": "main/main.js",
-  "author": "Polaris",
-  "scripts": {
-    "dev": "electron .",
-    "build:web": "node scripts/build-web.mjs",
-    "build:backend": "node scripts/build-backend.mjs",
-    "pack": "node scripts/pack.mjs",
-    "dist": "node scripts/pack.mjs"
-  },
-  "devDependencies": {
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.8"
-  }
+  "author": "Polaris"
 }

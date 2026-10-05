@@ -244,10 +244,11 @@ async def _ai_plan(target: KaoyanTarget, payload) -> dict | None:
              {"role": "user", "content": prompt}],
             temperature=0.4,
         )
-        data = _parse_json(message.get("content") or "")
+        data = _parse_json((message.get("message") or {}).get("content") or "")
         if not data or not data.get("phases"):
             return None
         data["source"] = "ai"
+        data["usage"] = message.get("usage")  # 真实用量，由调用方记账
         return data
     except Exception as exc:                     # pragma: no cover
         logger.warning("AI 计划生成失败，回退规则引擎：%s", exc)
@@ -269,6 +270,9 @@ async def generate_plan(db: Session, user_id: int, payload) -> dict:
     """生成阶段计划 + 每日任务（AI 优先，规则回退）。"""
     target = require_target(db, user_id)
     plan = await _ai_plan(target, payload) or _rule_plan(target, payload)
+    if plan.get("usage"):
+        from app.services import ai_service
+        ai_service.record_usage(db, user_id, None, None, plan.pop("usage"))
 
     if payload.replace_existing:
         db.query(KaoyanPlanPhase).filter(KaoyanPlanPhase.target_id == target.id).delete()

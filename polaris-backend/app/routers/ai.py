@@ -12,8 +12,8 @@ from app.ai import rag
 from app.core.database import SessionLocal, get_db
 from app.core.deps import get_current_user
 from app.models.user import User
-from app.schemas.ai import ChatIn, ToolCallIn
-from app.services import ai_service
+from app.schemas.ai import ChatIn, LlmCfgIn, LlmTestIn, ToolCallIn
+from app.services import ai_config_service, ai_service
 
 logger = logging.getLogger("polaris.ai.router")
 router = APIRouter(prefix="/ai", tags=["⑫ AI 助手"])
@@ -114,6 +114,59 @@ def status(db: Session = Depends(get_db), user: User = Depends(get_current_user)
                 "top_k": settings.RAG_TOP_K},
         "max_tool_rounds": settings.MAX_TOOL_ROUNDS,
     }
+
+
+# ─────────── 模型配置与 Token 用量 ───────────
+@router.get("/config", summary="获取当前用户的大模型配置（Key 脱敏）与运行状态")
+def get_config(db: Session = Depends(get_db),
+               user: User = Depends(get_current_user)) -> dict:
+    from app.ai.deepseek import deepseek
+
+    cfg = ai_config_service.get_llm_cfg(user)
+    return {"config": ai_config_service.public_cfg(user), "status": deepseek.status(cfg)}
+
+
+@router.put("/config", summary="保存大模型配置（api_key 留空=不修改）")
+def save_config(body: LlmCfgIn, db: Session = Depends(get_db),
+                user: User = Depends(get_current_user)) -> dict:
+    data = body.model_dump(exclude_unset=True)
+    # api_key 传空字符串视为保持原值（前端脱敏展示无法回填）；显式清除用 null
+    if data.get("api_key") == "":
+        data.pop("api_key")
+    ai_config_service.set_llm_cfg(db, user, data)
+    return {"config": ai_config_service.public_cfg(user)}
+
+
+@router.post("/config/test", summary="测试模型连接（真实小请求，用量计入台账）")
+async def test_config(body: LlmTestIn, db: Session = Depends(get_db),
+                      user: User = Depends(get_current_user)) -> dict:
+    from app.ai.deepseek import deepseek
+
+    stored = ai_config_service.get_llm_cfg(user)
+    submitted = body.model_dump(exclude_unset=True)
+    # 测试用"表单值优先、已存值兜底"的合并配置（Key 留空则用已保存的 Key）
+    cfg = {**stored, **{k: v for k, v in submitted.items() if v not in (None, "")}}
+    result = await deepseek.test_connection(cfg)
+    usage = result.get("usage")
+    if usage:
+        ai_service.record_usage(db, user.id, None,
+                                result.get("model") or cfg.get("model"), usage)
+        result["usage"] = None  # 不回传细节，前端刷新汇总即可
+        result["recorded"] = True
+    return result
+
+
+@router.get("/usage", summary="Token 真实用量汇总（累计/今日/周/月/按模型/剩余）")
+def get_usage(db: Session = Depends(get_db),
+              user: User = Depends(get_current_user)) -> dict:
+    cfg = ai_config_service.get_llm_cfg(user)
+    return ai_config_service.usage_summary(db, user.id, quota=int(cfg.get("quota") or 0))
+
+
+@router.get("/usage/recent", summary="最近用量明细")
+def get_recent_usage(limit: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db),
+                     user: User = Depends(get_current_user)) -> dict:
+    return {"items": ai_config_service.recent_usage(db, user.id, limit=limit)}
 
 
 @router.post("/reindex", summary="重建当前用户全部文档的向量索引")

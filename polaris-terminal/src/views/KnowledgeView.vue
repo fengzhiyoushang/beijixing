@@ -158,7 +158,7 @@ async function removeDoc(d) {
 
 /* 点击标签 → 快速筛选（暂以关键词检索代替：填入标题搜索） */
 const q = ref('')
-const qa = ref([{ q: store.ragDemo.question, a: store.ragDemo.answer, refs: store.ragDemo.refs }])
+const qa = ref([])
 const asking = ref(false)
 
 const docs = computed(() => store.knowledgeDocs)
@@ -224,7 +224,6 @@ async function ask() {
   <div class="page">
     <div class="page-head">
       <h2>知识整理</h2>
-      <span class="sub mono">KNOWLEDGE · 多格式文档 + Markdown + RAG 问答</span>
       <span class="spacer" />
       <input ref="docInput" type="file" accept=".md,.markdown,.txt,.docx,.xlsx" style="display:none" @change="onDocFile" />
       <NButton size="small" quaternary @click="newDoc">✎ 新建文档</NButton>
@@ -334,7 +333,6 @@ async function ask() {
           <NInput v-model:value="q" size="small" placeholder="基于知识库提问…" @keyup.enter="ask" />
           <NButton size="small" type="primary" :loading="asking" @click="ask">提问</NButton>
         </div>
-        <div class="mini-note mono">原型：本地 mock 检索；接入后端后走 BM25 + DeepSeek 生成，并返回真实引用片段。</div>
       </section>
 
       <section class="col-4 card">
@@ -358,7 +356,6 @@ async function ask() {
           <NDynamicTags v-model:value="uploadOpts.tags" size="small" />
         </NFormItem>
       </NForm>
-      <div class="mini-note mono">支持 md / txt / docx / xlsx，上传后自动解析入库并向量化。</div>
       <template #footer>
         <div style="display:flex; justify-content:flex-end; gap:10px">
           <NButton size="small" @click="showUploadOpts = false">取消</NButton>

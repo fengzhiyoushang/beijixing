@@ -276,7 +276,7 @@ function toneOf(ddl) {
           </div>
           <div class="kb-chart">
             <div class="mini-title label-3">本周每日入库量</div>
-            <GlowChart :option="kbTrendOption" height="72px" />
+            <GlowChart :option="kbTrendOption" height="64px" />
           </div>
           <div class="kb-tags">
             <div class="mini-title label-3">高频标签</div>
@@ -373,21 +373,51 @@ function toneOf(ddl) {
 .ring-sub { font-size: 10px; color: var(--text-3); text-align: center; padding-bottom: 4px; }
 .mini-title { font-size: 11px; margin-bottom: 6px; }
 
-/* 知识库 */
-.kb-body { display: grid; grid-template-columns: 120px 130px 120px 1fr 1.2fr; gap: 18px; align-items: center; }
-.kb-stat { text-align: center; }
-.kb-stat .label-3 { margin-top: 2px; }
-.kb-chart, .kb-tags { min-width: 0; }
-.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 知识库量化：自适应栅格，窄窗口自动换行不错位/不变形 */
+.kb-body {
+  display: grid;
+  /* 三个指标卡固定最小宽，图表/标签弹性伸缩 */
+  grid-template-columns: repeat(3, minmax(88px, 1fr)) minmax(150px, 1.15fr) minmax(170px, 1.4fr);
+  gap: 16px 18px;
+  align-items: center;
+}
+.kb-stat {
+  text-align: center;
+  min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+}
+.kb-stat .num-big {
+  /* 长数字（如 128.6）不撑破单元格 */
+  font-size: clamp(19px, 1.55vw, 26px);
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.kb-stat .label-3 { white-space: nowrap; }
+.kb-chart, .kb-tags { min-width: 0; align-self: center; }
+.kb-chart { display: flex; flex-direction: column; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; max-height: 68px; overflow: hidden; }
 .tag-pill {
   font-size: 11px; padding: 3px 10px; border-radius: 999px;
   border: 1px solid var(--border); color: var(--text-2); background: rgba(255, 255, 255, 0.02);
+  white-space: nowrap;
 }
 .tag-pill:hover { color: var(--accent); border-color: rgba(74, 222, 128, 0.4); }
 
-@media (max-width: 1400px) {
-  .kb-body { grid-template-columns: 1fr 1fr 1fr; }
-  .kb-chart, .kb-tags { grid-column: span 3; }
+/* 分档降级：先让图表/标签换到第二行，再把三个指标并排 */
+@media (max-width: 1360px) {
+  .kb-body { grid-template-columns: repeat(3, minmax(88px, 1fr)) 1fr; }
+  .kb-tags { grid-column: 1 / -1; }
+  .tags { max-height: none; }
+}
+@media (max-width: 1080px) {
+  .kb-body { grid-template-columns: repeat(3, 1fr); }
+  .kb-chart, .kb-tags { grid-column: 1 / -1; }
+  .tags { max-height: none; }
+}
+@media (max-width: 640px) {
+  .kb-body { grid-template-columns: repeat(2, 1fr); }
+  .kb-stat:nth-child(3) { grid-column: 1 / -1; }
 }
 @media (max-width: 1100px) {
   .study-body { flex-direction: column; }

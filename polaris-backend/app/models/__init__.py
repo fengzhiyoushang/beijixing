@@ -1,11 +1,14 @@
 """模型注册中心：导入全部 ORM 模型（建表与关系解析依赖此处）。"""
-from app.models.ai import AiMessage, AiSession
+from app.models.ai import AiMessage, AiSession, AiUsage
+from app.models.bookmark import Bookmark
 from app.models.classroom import Classroom, ClassroomStatusLog, ClassroomUsageRecord
 from app.models.course import Course, CourseSchedule, Semester
 from app.models.finance import FinanceBudget, FinanceRecord
 from app.models.health import HealthRecord, HealthSetting
 from app.models.kaoyan import KaoyanPlanPhase, KaoyanPlanTask, KaoyanTarget
+from app.models.kaoyan_intel import KaoyanIntel
 from app.models.knowledge import KnowledgeChunk, KnowledgeDoc, KnowledgeFolder
+from app.models.news import NewsCrawlLog, NewsItem, NewsSource
 from app.models.pdf_schedule import PdfScheduleEntry, PdfScheduleUpload
 from app.models.study import StudyRecord
 from app.models.system import DataBackup, SystemConfig
@@ -16,6 +19,10 @@ from app.models.wechat import WxPushLog, WxSubscriptionQuota
 __all__ = [
     # ① 用户
     "User",
+    # ⑮ 地址中心
+    "Bookmark",
+    # ⑯ 新闻资讯
+    "NewsSource", "NewsItem", "NewsCrawlLog",
     # ② 课程
     "Semester", "Course", "CourseSchedule",
     # ③ DDL 任务
@@ -28,6 +35,8 @@ __all__ = [
     "StudyRecord",
     # ⑦ 考研
     "KaoyanTarget", "KaoyanPlanPhase", "KaoyanPlanTask",
+    # ⑰ 考研情报缓存
+    "KaoyanIntel",
     # ⑧ 知识库
     "KnowledgeFolder", "KnowledgeDoc", "KnowledgeChunk",
     # ⑨ 财务
@@ -35,7 +44,7 @@ __all__ = [
     # ⑩ 健康
     "HealthRecord", "HealthSetting",
     # AI 会话
-    "AiSession", "AiMessage",
+    "AiSession", "AiMessage", "AiUsage",
     # 系统管理
     "DataBackup", "SystemConfig",
     # 微信订阅消息
@@ -53,7 +62,10 @@ ALL_TABLES = [
     "knowledge_folders", "knowledge_docs", "knowledge_chunks",
     "finance_records", "finance_budgets",
     "health_records", "health_settings",
-    "ai_sessions", "ai_messages",
+    "ai_sessions", "ai_messages", "ai_usage",
     "data_backups", "system_configs",
     "wx_subscription_quotas", "wx_push_logs",
+    "bookmarks",
+    "news_sources", "news_items", "news_crawl_logs",
+    "kaoyan_intel",
 ]

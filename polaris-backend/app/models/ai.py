@@ -1,7 +1,9 @@
-"""AI 会话与消息（Function Call 轨迹落库）。"""
+"""AI 会话与消息（Function Call 轨迹落库）+ Token 用量台账。"""
 from __future__ import annotations
 
-from sqlalchemy import JSON, ForeignKey, Index, Integer, String
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -51,7 +53,7 @@ class AiMessage(Base, TimestampMixin):
     content: Mapped[str | None] = mapped_column(LongText, default=None)
     tool_calls: Mapped[list] = mapped_column(JSON, default=list, comment="模型请求调用的工具")
     tool_name: Mapped[str | None] = mapped_column(String(64), default=None, comment="tool 角色时的工具名")
-    tokens: Mapped[int] = mapped_column(Integer, default=0)
+    tokens: Mapped[int] = mapped_column(Integer, default=0, comment="本条消息折算 token（估算值，权威用量见 ai_usage）")
 
     session: Mapped[AiSession] = relationship(back_populates="messages")
 
@@ -62,5 +64,37 @@ class AiMessage(Base, TimestampMixin):
             "content": self.content,
             "tool_calls": self.tool_calls or [],
             "tool_name": self.tool_name,
+            "created_at": iso(self.created_at),
+        }
+
+
+class AiUsage(Base):
+    """Token 用量台账：每次真实调用记一行（provider 返回的 usage 原样落库）。"""
+    __tablename__ = "ai_usage"
+    __table_args__ = (
+        Index("ix_ai_usage_user_time", "user_id", "created_at"),
+        {"comment": "AI 调用 token 用量（真实计数，供顶部消耗/剩余展示）"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    session_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    model: Mapped[str] = mapped_column(String(80), default="")
+    provider: Mapped[str] = mapped_column(String(40), default="deepseek")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    estimated: Mapped[bool] = mapped_column(Boolean, default=False, comment="provider 未返回 usage 时为估算")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "model": self.model,
+            "provider": self.provider,
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "total_tokens": self.total_tokens,
+            "estimated": self.estimated,
             "created_at": iso(self.created_at),
         }

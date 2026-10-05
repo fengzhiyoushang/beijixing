@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NButton, NForm, NFormItem, NInput, NModal, NPopconfirm, NRadio, NRadioGroup, NSelect, NSwitch, useMessage } from 'naive-ui'
+import { NButton, NDatePicker, NForm, NFormItem, NInput, NModal, NPopconfirm, NRadio,
+         NRadioButton, NRadioGroup, NSelect, NSwitch, useMessage } from 'naive-ui'
 import { classroomApi } from '../api'
 import { store } from '../store'
 import GlowChart from '../components/GlowChart.vue'
@@ -12,7 +13,16 @@ watch(() => store.classroom.predict, (p) => { if (!picked.value && p.length) pic
 
 /* ── 采集记录：照片预览 + 删除 ── */
 const previewRec = ref(null)
-function openPreview(r) { if (r.photoUrl) previewRec.value = r }
+const previewShow = ref(false)         // 弹窗显隐用独立布尔量（不能复用对象）
+function openPreview(r) {
+  if (!r?.photoUrl) { message.warning('该记录没有存证照片'); return }
+  previewRec.value = r
+  previewShow.value = true
+}
+function closePreview() {
+  previewShow.value = false
+  previewRec.value = null
+}
 async function removeRecord(r) {
   if (!r.id) { message.warning('该记录缺少 ID，无法删除'); return }
   try {
@@ -366,31 +376,153 @@ async function runRecognize() {
   }
 }
 
-/* ── 教室使用可视化：每栋教学楼一张图（Y=楼层，X=教室序号），按所选时段着色 ── */
+/* ── 教室使用可视化：每栋教学楼一张图（Y=楼层，X=教室序号），按所选「日期+时段」着色 ──
+   时间维度优先级最高：
+   ① 默认「跟随当前时间」——打开页面即显示此刻全校占用
+   ② 可切到「指定日期」——精确到年月日，后端按该日期所在教学周匹配课表周次列
+      （如「2-16周双」只在双周生效），从而正确判断某月某日某时段是否有课
+   ③ 可切到「按教学周」——直接指定第 N 周
+   ④ 开始/结束时间可自定义查询区间（覆盖一节课或多节课） */
 const DAY_CN = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 const campus = computed(() => store.classroom.campus)
-const selDay = ref(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1)  // 0~6 → 周一~周日
-const selHour = ref(10)
+
+/** 本地日期 → YYYY-MM-DD */
+function ymd(d) {
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+function todayTs() {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+/* 时间模式：now=跟随当前时间 | date=指定日期 | week=指定教学周 */
+const timeMode = ref('now')
+const pickDateTs = ref(todayTs())          // NDatePicker 用时间戳
+const pickWeek = ref(1)
+const selStartHour = ref(new Date().getHours())
+const selEndHour = ref(new Date().getHours() + 1)
+
+/** 当前生效的查询日期（YYYY-MM-DD）与教学周 */
+const queryDate = computed(() => (timeMode.value === 'date' ? ymd(new Date(pickDateTs.value)) : ymd(new Date())))
+const queryWeek = computed(() => (timeMode.value === 'week' ? Number(pickWeek.value) : undefined))
+
+/** 手动选择的星期（0=周一 … 6=周日）；仅在「按教学周」模式下生效 */
+const manualDay = ref(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1)
+
+/**
+ * 生效的星期：
+ * - 跟随当前时间 / 指定日期：由日期推导（保证与课表 weekday 严格对齐）
+ * - 按教学周：周次无法确定具体日期，由用户手动选择星期
+ */
+const selDay = computed(() => {
+  if (timeMode.value === 'week') return manualDay.value
+  const d = timeMode.value === 'date' ? new Date(pickDateTs.value) : new Date()
+  return d.getDay() === 0 ? 6 : d.getDay() - 1
+})
+
+/** 星期是否可手动选择（仅按教学周模式） */
+const dayEditable = computed(() => timeMode.value === 'week')
 
 const dayOptions = DAY_CN.map((d, i) => ({ label: d, value: i }))
 const hourOptions = computed(() => (campus.value.hours || []).map((h) => ({ label: `${h}:00`, value: h })))
+const weekOptions = computed(() => {
+  const total = campus.value.semester?.total_weeks || 20
+  return Array.from({ length: total }, (_, i) => ({ label: `第 ${i + 1} 周`, value: i + 1 }))
+})
+const timeModes = [
+  { label: '跟随当前时间', value: 'now' },
+  { label: '指定日期', value: 'date' },
+  { label: '按教学周', value: 'week' },
+]
+
+/** 学期与周次提示文案 */
+const semesterTip = computed(() => {
+  const s = campus.value.semester
+  if (!s) return ''
+  const wk = s.week ? `第 ${s.week} 周` : '学期范围外'
+  const rng = s.week_start ? `（${s.week_start} ~ ${s.week_end}）` : ''
+  return `学期起始 ${s.start_date || '未设置'} · 共 ${s.total_weeks} 周 · 查询日 ${s.query_date} 属${wk}${rng}`
+})
+
+/** 时段范围文案 */
+const rangeTip = computed(() => `${String(selStartHour.value).padStart(2, '0')}:00 ~ ${String(selEndHour.value).padStart(2, '0')}:00`)
 
 async function loadCampus() {
-  try { await store.loadCampusUsage() }
-  catch (err) { message.error('加载失败：' + err.message) }
+  try {
+    await store.loadCampusUsage({
+      on_date: timeMode.value === 'now' ? undefined : queryDate.value,
+      week: queryWeek.value,
+    })
+  } catch (err) {
+    message.error('加载失败：' + err.message)
+  }
 }
+
+/** 切换时间模式：now 时同步把时刻设为“现在” */
+function onModeChange(m) {
+  if (m === 'now') {
+    const h = new Date().getHours()
+    selStartHour.value = h
+    selEndHour.value = Math.min(h + 1, 23)
+  }
+  loadCampus()
+}
+function onDateChange(ts) {
+  pickDateTs.value = ts ?? todayTs()
+  loadCampus()
+}
+function onWeekChange(w) {
+  pickWeek.value = w
+  loadCampus()
+}
+function jumpToNow() {
+  timeMode.value = 'now'
+  onModeChange('now')
+}
+function stepDate(delta) {
+  const d = new Date(pickDateTs.value)
+  d.setDate(d.getDate() + delta)
+  pickDateTs.value = d.getTime()
+  timeMode.value = 'date'
+  loadCampus()
+}
+
+/** 默认加载：跟随当前时间 */
 watch(() => store.classroom.overview, (ov) => { if (ov && ov.length && !campus.value.buildings.length) loadCampus() }, { immediate: true })
 
-/* 每栋楼 → 楼层行（高层在上）→ 每行 10 个教室格子 */
+/** 教学周初始值：跟随当前周 */
+watch(() => campus.value.semester?.week, (w) => { if (w && !pickWeek.value) pickWeek.value = w }, { immediate: true })
+
+/** 时段范围变化 → 只重算着色，不重新请求（矩阵含整日数据） */
+watch([selStartHour, selEndHour], () => { /* 着色为 computed，无需请求 */ })
+
+/** 当前时段覆盖的小时列表（含起止闭区间，便于跨节次查询） */
+const activeHours = computed(() => {
+  const a = Math.min(selStartHour.value, selEndHour.value)
+  const b = Math.max(selStartHour.value, selEndHour.value)
+  const out = []
+  for (let h = a; h <= b; h++) out.push(h)
+  return out
+})
+
+/** 每栋楼 → 楼层行（高层在上）→ 每行 10 个教室格子；格子状态取所选时段内「任一小时有课即占用」 */
 const buildingCharts = computed(() => {
   const hours = campus.value.hours || []
-  const hi = hours.indexOf(selHour.value)
+  const idxs = activeHours.value.map((h) => hours.indexOf(h)).filter((i) => i >= 0)
   return (campus.value.buildings || []).map((b) => {
     const floors = new Map()
     for (const r of b.rooms) {
       const fl = r.floor ?? parseInt((r.room_no.split('#')[1] || '0')[0], 10) ?? 1
       const seq = (r.room_no.match(/(\d{2})$/) || [])[1] || r.room_no
-      const state = hi >= 0 ? r.matrix[selDay.value]?.[hi] ?? null : null
+      // 状态优先级：占用 > 空闲 > 未知
+      let state = null
+      for (const i of idxs) {
+        const v = r.matrix[selDay.value]?.[i] ?? null
+        if (v === 'busy') { state = 'busy'; break }
+        if (v === 'free') state = 'free'
+      }
       if (!floors.has(fl)) floors.set(fl, [])
       floors.get(fl).push({ seq, room: r, state, building: b.building })
     }
@@ -409,7 +541,10 @@ function cellStyle(state) {
 }
 function cellTitle(c) {
   const label = c.state === 'free' ? '空闲' : c.state === 'busy' ? '使用' : '未知'
-  return `${c.room.room_no} · ${DAY_CN[selDay.value]} ${selHour.value}:00 ${label}（点击查看使用详情）`
+  const when = timeMode.value === 'week'
+    ? `第 ${queryWeek.value} 周 ${DAY_CN[selDay.value]}`
+    : `${queryDate.value} ${DAY_CN[selDay.value]}`
+  return `${c.room.room_no} · ${when} ${rangeTip.value} ${label}（点击查看使用详情）`
 }
 
 /* ── 点击教室格子：浮动面板展示该教室当前时段的上课信息 ──
@@ -445,12 +580,19 @@ async function openUsage(c, ev) {
   usageRoom.value = `${c.building} ${c.room.room_no}`
   if (popMounted.value) popVisible.value = false   // 面板已开 → 先淡出，避免旧数据错乱
   try {
-    // 把「查看时段」的星期换算成本周对应日期
-    const d = new Date()
-    const isoToday = d.getDay() === 0 ? 7 : d.getDay()
-    d.setDate(d.getDate() + (selDay.value + 1 - isoToday))
-    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    const data = await store.roomUsageAt(c.building, c.room.room_no, day, selHour.value)
+    // 查询日期：指定日期/教学周模式下用所选日期；跟随模式用今天
+    let day = queryDate.value
+    if (timeMode.value === 'week') {
+      // 按教学周查询：由学期起始日 + 周次 + 星期换算出具体日期
+      const s = campus.value.semester
+      if (s?.start_date) {
+        const d = new Date(`${s.start_date}T00:00:00`)
+        d.setDate(d.getDate() + (Number(pickWeek.value) - 1) * 7 + selDay.value)
+        day = ymd(d)
+      }
+    }
+    const data = await store.roomUsageAt(c.building, c.room.room_no, day, selStartHour.value,
+                                         queryWeek.value)
     if (seq !== popSeq) return   // 已有更新的点击，丢弃过期响应
     usageData.value = data
     popMounted.value = true
@@ -522,25 +664,69 @@ const stats = computed(() => {
 const predictOption = computed(() => ({
   grid: { left: 110, right: 30, top: 14, bottom: 20 },
   xAxis: { type: 'value', max: 100, ...axisBase(), splitLine: { lineStyle: { color: 'rgba(42,42,42,0.7)' } } },
-  yAxis: { type: 'category', data: store.classroom.predict.map((r) => r.room), ...axisBase(), splitLine: { show: false }, axisLabel: { color: '#9ca3af', fontSize: 11 } },
+  yAxis: { type: 'category', data: predictRows.value.map((r) => r.room), ...axisBase(), splitLine: { show: false }, axisLabel: { color: '#9ca3af', fontSize: 11 } },
   tooltip: { trigger: 'axis', backgroundColor: '#1e1e1e', borderColor: '#2a2a2a', textStyle: { color: '#e5e7eb', fontSize: 12 } },
   series: [
     {
       ...glowBar(store.settings.accent),
-      data: store.classroom.predict.map((r) => r.free),
+      data: predictRows.value.map((r) => r.free),
       barWidth: 14,
       itemStyle: { borderRadius: [0, 6, 6, 0], color: store.settings.accent, shadowColor: store.settings.accent + '99', shadowBlur: 12 },
       label: { show: true, position: 'right', color: '#9ca3af', fontSize: 11, formatter: '{c}%' },
     },
   ],
 }))
+
+/* ── 空闲预测：空状态降级 ──
+   无历史快照时不再留白，而是：
+   ① 显示后端 hint（当前时刻无样本）
+   ② 用「已导入的教室课表」推算该时段无课教室，作为可参考的替代信息
+   ③ 给出「去采集一次 / 重新推算」的可操作入口 */
+const predictRows = computed(() => store.classroom.predict || [])
+const campusLoading = computed(() => store.classroom.campusLoading)
+const predHint = computed(() => {
+  const p = store.classroom.predictHint
+  return p || '当前时段暂无历史采集快照'
+})
+const dayLabel = computed(() => DAY_CN[selDay.value] || '')
+
+/** 当前选择时段内，按课表推算「无课」的教室（取前 24 间，按楼栋+房号排序） */
+const schedFreeRooms = computed(() => {
+  const hours = campus.value.hours || []
+  const idxs = activeHours.value.map((h) => hours.indexOf(h)).filter((i) => i >= 0)
+  if (!idxs.length) return []
+  const out = []
+  for (const b of campus.value.buildings || []) {
+    for (const r of b.rooms) {
+      let state = null
+      for (const i of idxs) {
+        const v = r.matrix[selDay.value]?.[i] ?? null
+        if (v === 'busy') { state = 'busy'; break }
+        if (v === 'free') state = 'free'
+      }
+      // 仅收「已导入课表且此时段无课」的教室（state === 'free'）
+      if (state === 'free') {
+        out.push({ key: `${b.building}-${r.room_no}`, building: b.building, room_no: r.room_no, floor: r.floor })
+      }
+    }
+  }
+  return out.slice(0, 24)
+})
+
+function gotoUpload() {
+  showUpload.value = true
+}
+
+function focusRoom(r) {
+  // 同步热力图选中该教室，方便用户点开看详情
+  store.classroom.heatSel = { building: r.building, room_no: r.room_no }
+}
 </script>
 
 <template>
   <div class="page">
     <div class="page-head">
       <h2>空教室</h2>
-      <span class="sub mono">CLASSROOM · 拍照采集 + 规律学习 + 空闲预测</span>
       <span class="spacer" />
       <input ref="excelInput" type="file" accept=".xlsx,.xls" multiple style="display:none" @change="onExcelFile" />
       <input ref="usageInput" type="file" accept=".xlsx,.xls" style="display:none" @change="onUsageExcelFile" />
@@ -596,17 +782,52 @@ const predictOption = computed(() => ({
             <span class="en">ROOM USAGE · 楼层 × 教室</span>
           </div>
           <div class="usage-ctrl">
-            <span class="ctrl-label">查看时段</span>
-            <NSelect v-model:value="selDay" size="tiny" class="ctrl-day" :options="dayOptions" />
-            <NSelect v-model:value="selHour" size="tiny" class="ctrl-hour" :options="hourOptions" />
+            <!-- 时间维度（最高优先级）：跟随当前 / 指定日期 / 按教学周 -->
+            <NRadioGroup v-model:value="timeMode" size="tiny" @update:value="onModeChange">
+              <NRadioButton v-for="m in timeModes" :key="m.value" :value="m.value">{{ m.label }}</NRadioButton>
+            </NRadioGroup>
+
+            <template v-if="timeMode === 'date'">
+              <button class="step-btn" title="前一天" @click="stepDate(-1)">‹</button>
+              <NDatePicker v-model:value="pickDateTs" type="date" size="tiny" class="ctrl-date"
+                           :actions="['clear', 'confirm']" @update:value="onDateChange" />
+              <button class="step-btn" title="后一天" @click="stepDate(1)">›</button>
+            </template>
+
+            <template v-else-if="timeMode === 'week'">
+              <NSelect v-model:value="pickWeek" size="tiny" class="ctrl-week"
+                       :options="weekOptions" @update:value="onWeekChange" />
+            </template>
+
+            <template v-else>
+              <span class="ctrl-now mono">{{ queryDate }} {{ DAY_CN[selDay] }}</span>
+            </template>
+
+            <!-- 星期：按教学周模式可手动选；其余模式由日期自动推导 -->
+            <span class="ctrl-label">星期</span>
+            <NSelect v-if="dayEditable" v-model:value="manualDay" size="tiny" class="ctrl-day" :options="dayOptions" />
+            <span v-else class="ctrl-now mono">{{ DAY_CN[selDay] }}</span>
+
+            <!-- 时间段区间 -->
+            <span class="ctrl-label">时段</span>
+            <NSelect v-model:value="selStartHour" size="tiny" class="ctrl-hour" :options="hourOptions" />
+            <span class="ctrl-tilde">~</span>
+            <NSelect v-model:value="selEndHour" size="tiny" class="ctrl-hour" :options="hourOptions" />
+
+            <NButton size="tiny" quaternary @click="jumpToNow">回到此刻</NButton>
           </div>
         </header>
         <div class="legend">
           <span class="lg"><i class="sw" style="background:rgba(74,222,128,0.85);box-shadow:0 0 8px #4ade80" />空闲</span>
           <span class="lg"><i class="sw" style="background:rgba(248,113,113,0.85)" />使用</span>
           <span class="lg"><i class="sw" style="background:rgba(107,114,128,0.25)" />未知</span>
-          <span class="lg-note mono">{{ DAY_CN[selDay] }} {{ selHour }}:00 各教学楼教室状态</span>
+          <span class="lg-note mono">
+            {{ queryDate }} {{ DAY_CN[selDay] }} {{ rangeTip }} ·
+            {{ timeMode === 'week' ? `第 ${queryWeek} 周` : (campus.semester?.week ? `第 ${campus.semester.week} 周` : '学期外') }}
+            · {{ timeMode === 'now' ? '跟随当前时间' : '指定时间' }}
+          </span>
         </div>
+        <div v-if="semesterTip" class="sem-tip mono">🗓 {{ semesterTip }}</div>
         <div v-if="store.classroom.campusLoading && !campus.buildings.length" class="usage-empty">加载中…</div>
         <div v-else-if="!campus.buildings.length" class="usage-empty">暂无教室数据</div>
         <div v-else class="building-list">
@@ -631,23 +852,61 @@ const predictOption = computed(() => ({
         <footer class="heat-foot mono">每栋教学楼一张图：纵轴=楼层（顶到底），横轴=教室序号（1-10）；红=该时段有课，绿=已导入该教室课表且此时段无课，灰=未知（未导入课表且无采集记录）。切换上方「查看时段」可看任意星期/时刻全校占用分布。</footer>
       </section>
 
-      <section class="col-4 card">
-        <header class="card-head"><div class="card-title">✦ 空闲预测推荐 <span class="en">PREDICTION</span></div></header>
-        <GlowChart :option="predictOption" height="200px" />
-        <div class="predict-list">
-          <div
-            v-for="p in store.classroom.predict" :key="p.room"
-            class="p-row" :class="{ on: picked === p.room }"
-            @click="picked = p.room"
-          >
-            <span class="dot" :class="p.free > 75 ? 'dot-green' : p.free > 60 ? 'dot-yellow' : 'dot-red'" />
-            <div class="p-mid">
-              <div class="p-room">{{ p.room }}</div>
-              <div class="p-meta mono">{{ p.last }} · 样本 {{ p.samples }}</div>
+      <section class="col-4 card predict-card">
+        <header class="card-head">
+          <div class="card-title">✦ 空闲预测推荐 <span class="en">PREDICTION</span></div>
+          <span v-if="predictRows.length" class="chip chip-accent">{{ predictRows.length }} 间</span>
+        </header>
+
+        <template v-if="predictRows.length">
+          <GlowChart :option="predictOption" height="188px" />
+          <div class="predict-list">
+            <div
+              v-for="p in predictRows" :key="p.room"
+              class="p-row" :class="{ on: picked === p.room }"
+              @click="picked = p.room"
+            >
+              <span class="dot" :class="p.free > 75 ? 'dot-green' : p.free > 60 ? 'dot-yellow' : 'dot-red'" />
+              <div class="p-mid">
+                <div class="p-room">{{ p.room }}</div>
+                <div class="p-meta mono">{{ p.last }} · 样本 {{ p.samples }}</div>
+              </div>
+              <div class="p-free mono">{{ p.free }}%</div>
             </div>
-            <div class="p-free mono">{{ p.free }}%</div>
           </div>
-        </div>
+        </template>
+
+        <!-- 无历史快照时：给出可操作的空状态 + 从已导入课表推算的参考空闲教室 -->
+        <template v-else>
+          <div class="pred-empty">
+            <div class="pe-title mono">◌ {{ predHint }}</div>
+            <div class="pe-tip">空闲预测需先积累「教室状态采集记录」；下方为按已导入课表推算的{{ dayLabel }} {{ rangeTip }} 无课教室，可先参考。</div>
+          </div>
+
+          <div v-if="schedFreeRooms.length" class="pred-free">
+            <div class="pf-head mono">
+              <span>按课表推算无课教室</span>
+              <span class="pf-count">{{ schedFreeRooms.length }} 间</span>
+            </div>
+            <div class="pf-list">
+              <button v-for="r in schedFreeRooms" :key="r.key" class="pf-item"
+                      :title="`${r.building} ${r.room_no} — 该时段无课`"
+                      @click="picked = r.room_no; focusRoom(r)">
+                <span class="dot dot-green" />
+                <span class="pf-name">{{ r.building }} {{ r.room_no }}</span>
+                <span class="pf-floor mono">{{ r.floor ? r.floor + 'F' : '' }}</span>
+              </button>
+            </div>
+          </div>
+          <div v-else class="pred-empty small">
+            <div class="pe-tip">当前时段没有可推算的无课教室（可能未导入教室课表）。可先「导入教室课表 Excel」，或在小程序/网页上报几次教室状态后再看预测。</div>
+          </div>
+
+          <div class="pe-ops">
+            <NButton size="tiny" secondary @click="gotoUpload">＋ 去采集一次</NButton>
+            <NButton size="tiny" quaternary :loading="campusLoading" @click="loadCampus">↻ 重新推算</NButton>
+          </div>
+        </template>
       </section>
     </div>
 
@@ -709,9 +968,6 @@ const predictOption = computed(() => ({
           <li>叠加本人课表：上课时段自动排除该教室</li>
           <li>连续采集 2 周后，预测命中率可达 85% 以上</li>
         </ol>
-        <div class="mini-note mono">
-          点击右上角「上传教室照片」即可采集：支持手动标注空闲/占用，或让 AI 识图自动判定，数据实时汇入热力图。
-        </div>
       </section>
     </div>
 
@@ -927,7 +1183,8 @@ const predictOption = computed(() => ({
       </Transition>
     </Teleport>
     <!-- 采集记录照片预览 -->
-    <NModal v-model:show="previewRec" preset="card" title="🖼 存证照片" style="width: 560px" :bordered="false">
+    <NModal :show="previewShow" preset="card" title="🖼 存证照片" style="width: 560px" :bordered="false"
+            @update:show="(v) => { if (!v) closePreview() }">
       <div v-if="previewRec" class="pv-wrap">
         <img :src="previewRec.photoUrl" class="pv-img" :alt="previewRec.room" />
         <div class="pv-meta mono">
@@ -1044,11 +1301,26 @@ const predictOption = computed(() => ({
 .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 
 .usage-empty { padding: 40px 0; text-align: center; color: var(--text-3); font-size: 12px; }
-.usage-ctrl { display: flex; align-items: center; gap: 6px; }
-.ctrl-label { font-size: 10px; color: var(--text-3); }
+.usage-ctrl { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.ctrl-label { font-size: 10px; color: var(--text-3); white-space: nowrap; }
 .ctrl-day { width: 72px; }
-.ctrl-hour { width: 82px; }
+.ctrl-hour { width: 76px; }
+.ctrl-week { width: 92px; }
+.ctrl-date { width: 132px; }
+.ctrl-now { font-size: 10.5px; color: var(--text-2); white-space: nowrap; }
+.ctrl-tilde { font-size: 11px; color: var(--text-3); }
+.step-btn {
+  width: 20px; height: 20px; line-height: 1; flex-shrink: 0;
+  border: 1px solid var(--border); border-radius: 5px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.03); color: var(--text-2); font-size: 13px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.step-btn:hover { color: var(--accent); border-color: rgba(74, 222, 128, 0.4); }
+.sem-tip { font-size: 10px; color: var(--text-3); margin-top: 6px; }
 .lg-note { font-size: 10px; color: var(--text-3); margin-left: 6px; }
+@media (max-width: 1500px) {
+  .usage-ctrl { justify-content: flex-start; }
+}
 
 .building-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; max-height: 620px; overflow-y: auto; padding-right: 4px; }
 .b-chart { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; }
@@ -1067,8 +1339,7 @@ const predictOption = computed(() => ({
 .heat-foot { font-size: 10px; color: var(--text-3); margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 8px; }
 
 /* 教室使用详情：锚定格子的浮动面板 */
-.room-pop {
-  position: fixed; z-index: 3000; width: 320px; max-width: calc(100vw - 20px);
+.room-pop {  position: fixed; z-index: 3000; width: 320px; max-width: calc(100vw - 20px);
   max-height: min(420px, calc(100vh - 24px)); overflow-y: auto;
   background: var(--card, #1e1e1e); border: 1px solid var(--border); border-radius: 12px;
   box-shadow: 0 12px 36px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03);
@@ -1112,6 +1383,29 @@ const predictOption = computed(() => ({
 .pd-mid { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .predict-list { margin-top: 6px; }
+
+/* ── 空闲预测：无快照时的降级视图 ── */
+.predict-card { align-self: start; }          /* 不随同行左卡被拉伸出大片空白 */
+.pred-empty { border: 1px dashed var(--border); border-radius: 9px; padding: 10px 11px; margin-bottom: 9px; }
+.pred-empty.small { border-style: solid; background: rgba(255,255,255,0.014); }
+.pe-title { font-size: 11.5px; color: var(--text-2); margin-bottom: 5px; }
+.pe-tip { font-size: 10.5px; color: var(--text-3); line-height: 1.65; }
+.pred-free { margin-bottom: 9px; }
+.pf-head { display: flex; align-items: center; justify-content: space-between; font-size: 10.5px; color: var(--text-3); margin-bottom: 6px; }
+.pf-count { color: var(--text-2); }
+.pf-list {
+  display: grid; grid-template-columns: 1fr; gap: 3px;
+  max-height: 268px; overflow-y: auto; padding-right: 2px;
+}
+.pf-item {
+  display: flex; align-items: center; gap: 7px; cursor: pointer; text-align: left;
+  padding: 5px 7px; border-radius: 7px; border: 1px solid transparent;
+  background: transparent; color: var(--text-2); font-size: 11.5px; min-width: 0;
+}
+.pf-item:hover { background: rgba(255,255,255,0.035); border-color: var(--border); color: var(--text-1); }
+.pf-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-floor { font-size: 10px; color: var(--text-3); flex-shrink: 0; }
+.pe-ops { display: flex; gap: 8px; padding-top: 2px; border-top: 1px dashed var(--border); margin-top: 4px; padding-top: 9px; }
 .p-row { display: flex; align-items: center; gap: 10px; padding: 8px 8px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
 .p-row:hover { background: rgba(255, 255, 255, 0.03); }
 .p-row.on { border-color: rgba(74, 222, 128, 0.4); background: rgba(74, 222, 128, 0.06); }

@@ -208,6 +208,13 @@ def extractive_answer(hits: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _record(db: Session, user, res: dict) -> None:
+    """把 RAG 调用的真实 usage 记入用量台账（局部导入避免循环依赖）。"""
+    from app.services import ai_service
+
+    ai_service.record_usage(db, user.id, None, res.get("model"), res.get("usage"))
+
+
 async def answer(
     db: Session,
     user,
@@ -229,9 +236,10 @@ async def answer(
             role=(user.config or {}).get("role", "考研备战中"))}]
         messages += (history or [])[-6:]
         messages.append({"role": "user", "content": question})
-        message = await deepseek.chat(messages, temperature=0.6)
+        res = await deepseek.chat(messages, temperature=0.6)
+        _record(db, user, res)
         return {
-            "answer": message.get("content") or "",
+            "answer": (res.get("message") or {}).get("content") or "",
             "references": [],
             "mode": "chat" if deepseek.is_configured else "chat-mock",
             "hits": [],
@@ -254,8 +262,9 @@ async def answer(
         {"role": "user", "content": prompts.RAG_PROMPT.format(context=context, question=question)},
     ]
     try:
-        message = await deepseek.chat(messages, temperature=0.3)
-        answer_text = message.get("content") or extractive_answer(hits)
+        res = await deepseek.chat(messages, temperature=0.3)
+        _record(db, user, res)
+        answer_text = (res.get("message") or {}).get("content") or extractive_answer(hits)
         mode_used = "rag" if deepseek.is_configured else "rag-mock"
     except Exception as exc:                     # pragma: no cover
         logger.warning("RAG 生成失败，回退抽取式：%s", exc)

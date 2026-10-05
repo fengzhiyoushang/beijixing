@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { NButton, NInput, NPopconfirm, NSelect, NSwitch, useMessage } from 'naive-ui'
+import { NButton, NColorPicker, NInput, NPopconfirm, NSelect, NSlider, NSwitch, useMessage } from 'naive-ui'
 import { coursesApi, healthApi, tasksApi } from '../api'
 import { store } from '../store'
 import { downloadCsv } from '../utils/export'
@@ -22,6 +22,108 @@ function applyAccent(color, name) {
   store.setAccent(color)
   message.success(`已切换主题强调色并已同步到账号配置：${name}`)
 }
+
+/* ─────────── 背景外观（自主设置） ─────────── */
+const ap = computed(() => store.settings.appearance)
+const activePreset = computed(() => s.value.bgPresets.find((p) => p.key === ap.value.preset))
+
+/** 常用底色快捷选择 */
+const BG_COLORS = [
+  { name: '墨黑（默认）', value: '#070a08' },
+  { name: '纯黑', value: '#000000' },
+  { name: '深灰', value: '#111315' },
+  { name: '深蓝', value: '#080d16' },
+  { name: '深紫', value: '#0d0812' },
+  { name: '深褐', value: '#120d08' },
+  { name: '暗绿', value: '#06100b' },
+]
+
+async function setApp(patch) {
+  try {
+    await store.setAppearance(patch)
+  } catch (err) {
+    message.error('保存失败：' + err.message)
+  }
+}
+
+function pickPreset(key) {
+  setApp({ preset: key })
+  const p = s.value.bgPresets.find((x) => x.key === key)
+  message.success(`背景光晕已切换：${p?.name || key}`)
+}
+
+/* ── 壁纸：读取 → 压缩 → 应用 ── */
+const wallInput = ref(null)
+
+/** 等比压缩到 maxW 宽，避免超出 localStorage 配额 */
+function compressImage(file, maxW = 2560, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('读取图片失败'))
+    reader.onload = () => {
+      const img = new Image()
+      img.onerror = () => reject(new Error('图片解析失败（格式不支持？）'))
+      img.onload = () => {
+        const scale = Math.min(1, maxW / (img.width || maxW))
+        const w = Math.max(1, Math.round(img.width * scale))
+        const h = Math.max(1, Math.round(img.height * scale))
+        const cv = document.createElement('canvas')
+        cv.width = w; cv.height = h
+        const ctx = cv.getContext('2d')
+        ctx.drawImage(img, 0, 0, w, h)
+        // PNG 透明图保留 png，其余转 jpeg 压体积
+        const isPng = /png$/i.test(file.type)
+        resolve(cv.toDataURL(isPng ? 'image/png' : 'image/jpeg', quality))
+      }
+      img.src = reader.result
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+async function onWallPick(e) {
+  const file = e.target.files?.[0]
+  e.target.value = ''            // 允许重复选同一文件
+  if (!file) return
+  if (!/^image\//.test(file.type)) { message.warning('请选择图片文件'); return }
+  if (file.size > 20 * 1024 * 1024) { message.warning('图片过大（请选 20MB 以内）'); return }
+  try {
+    const dataUrl = await compressImage(file)
+    await store.setWallpaper(dataUrl)
+    const kb = Math.round(dataUrl.length / 1024)
+    message.success(`壁纸已应用（约 ${kb} KB）`)
+  } catch (err) {
+    message.error(err.message)
+  }
+}
+
+async function clearWall() {
+  await store.setWallpaper('')
+  message.success('已清除自定义壁纸')
+}
+
+async function resetAppearance() {
+  await store.resetAppearance()
+  message.success('背景外观已恢复默认')
+}
+
+/** 预览区样式：底色 + 壁纸 + 主光晕角度 */
+const previewStyle = computed(() => {
+  const a = ap.value
+  const p = activePreset.value || s.value.bgPresets[0]
+  const dim = Math.min(90, Math.max(0, a.wallpaperDim ?? 45)) / 100
+  const layers = []
+  layers.push(`radial-gradient(140px 90px at 20% 0%, ${p.glow[0]}, transparent 70%)`)
+  layers.push(`radial-gradient(120px 80px at 95% 100%, ${p.glow[1]}, transparent 70%)`)
+  if (a.wallpaper) layers.push(`linear-gradient(rgba(0,0,0,${dim}), rgba(0,0,0,${dim}))`)
+  if (a.wallpaper) layers.push(`url("${a.wallpaper}")`)
+  return {
+    backgroundColor: a.bgColor || '#070a08',
+    backgroundImage: layers.join(', '),
+    backgroundSize: a.wallpaper ? 'auto, auto, auto, cover' : 'auto, auto',
+    backgroundPosition: 'center',
+  }
+})
 
 /** 连接测试：真实拉取后端运行态 */
 async function testConnection() {
@@ -171,41 +273,155 @@ async function grantQuota(kind) {
   <div class="page">
     <div class="page-head">
       <h2>系统设置</h2>
-      <span class="sub mono">SETTINGS · 个性化 / 数据源 / 推送 / 导出 / 关于</span>
     </div>
 
     <div class="grid">
-      <!-- 个性化 -->
-      <section class="col-6 card">
-        <header class="card-head"><div class="card-title">◐ 主题强调色 <span class="en">ACCENT</span></div></header>
-        <div class="accent-row">
-          <button
-            v-for="p in s.accentPresets" :key="p.value"
-            class="accent-btn" :class="{ on: s.accent === p.value }"
-            @click="applyAccent(p.value, p.name)"
-          >
-            <i class="sw" :style="{ background: p.value, boxShadow: `0 0 12px ${p.value}` }" />
-            <span>{{ p.name }}</span>
-            <em class="mono">{{ p.value }}</em>
-          </button>
-        </div>
-        <div class="hint mono">切换后图表、进度条、状态点会实时跟随（CSS 变量 + ECharts 重绘），并同步保存到你的账号配置</div>
-
-        <div class="divider" />
-
-        <div class="set-line">
+      <!-- ═══ 个性化：主题强调色 + 背景外观（合并为一张紧凑卡片）═══ -->
+      <section class="col-12 card personal">
+        <header class="card-head">
           <div>
-            <div class="s-title">默认折叠侧边导航</div>
-            <div class="label-3">适合小屏 / 专注模式</div>
+            <div class="card-title">🎨 个性化外观 <span class="en">APPEARANCE</span></div>
+            <div class="panel-sub">强调色、光晕配色、底色、网格、圆角与自定义壁纸——全部即时生效并保存</div>
           </div>
-          <NSwitch v-model:value="store.sidebarCollapsed" />
-        </div>
-        <div class="set-line">
-          <div>
-            <div class="s-title">天气城市</div>
-            <div class="label-3">顶部状态栏展示，保存到账号配置</div>
+          <div class="head-ops">
+            <NPopconfirm @positive-click="resetAppearance">
+              <template #trigger><NButton size="tiny" quaternary>↺ 恢复默认</NButton></template>
+              将光晕、底色、网格、圆角与壁纸全部恢复为出厂默认？
+            </NPopconfirm>
           </div>
-          <NSelect :value="store.settings.weatherCity" :options="cityOptions" size="small" style="width: 130px" @update:value="changeCity" />
+        </header>
+
+        <div class="p-body">
+          <!-- 左：全部控制项 -->
+          <div class="p-ctrl">
+            <!-- 主题强调色 -->
+            <div class="p-block">
+              <div class="p-block-head">
+                <span class="p-block-title">主题强调色</span>
+                <span class="p-block-hint">图表 / 进度条 / 状态点实时跟随</span>
+              </div>
+              <div class="accent-row">
+                <button v-for="p in s.accentPresets" :key="p.value"
+                        class="accent-btn" :class="{ on: s.accent === p.value }"
+                        :title="p.name + ' ' + p.value"
+                        @click="applyAccent(p.value, p.name)">
+                  <i class="sw" :style="{ background: p.value, boxShadow: `0 0 12px ${p.value}` }" />
+                  <span class="a-name">{{ p.name }}</span>
+                  <em class="mono">{{ p.value }}</em>
+                </button>
+              </div>
+            </div>
+
+            <!-- 光晕配色 -->
+            <div class="p-block">
+              <div class="p-block-head">
+                <span class="p-block-title">光晕配色</span>
+                <span class="p-block-hint">{{ activePreset?.hint }}</span>
+              </div>
+              <div class="bg-presets">
+                <button v-for="p in s.bgPresets" :key="p.key"
+                        class="bg-preset" :class="{ on: ap.preset === p.key }"
+                        :title="p.hint" @click="pickPreset(p.key)">
+                  <i class="bg-dot" :style="{ background: p.glow[0], boxShadow: `0 0 10px ${p.glow[0]}` }" />
+                  <i class="bg-dot sm" :style="{ background: p.glow[1] }" />
+                  <span>{{ p.name }}</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 滑杆组 -->
+            <div class="p-block">
+              <div class="p-sliders">
+                <div class="bg-slider-row">
+                  <span class="bg-label">光晕强度</span>
+                  <NSlider :value="ap.glow" :min="0" :max="160" :step="5" class="bg-slider"
+                           @update:value="(v) => setApp({ glow: v })" />
+                  <span class="bg-val mono">{{ ap.glow }}%</span>
+                </div>
+                <div class="bg-slider-row">
+                  <span class="bg-label">网格纹理</span>
+                  <NSlider :value="ap.grid" :min="0" :max="40" :step="2" class="bg-slider"
+                           @update:value="(v) => setApp({ grid: v })" />
+                  <span class="bg-val mono">{{ ap.grid }}%</span>
+                </div>
+                <div class="bg-slider-row">
+                  <span class="bg-label">卡片圆角</span>
+                  <NSlider :value="ap.radius" :min="8" :max="26" :step="1" class="bg-slider"
+                           @update:value="(v) => setApp({ radius: v })" />
+                  <span class="bg-val mono">{{ ap.radius }}px</span>
+                </div>
+                <div v-if="ap.wallpaper" class="bg-slider-row">
+                  <span class="bg-label">壁纸压暗</span>
+                  <NSlider :value="ap.wallpaperDim" :min="0" :max="90" :step="5" class="bg-slider"
+                           @update:value="(v) => setApp({ wallpaperDim: v })" />
+                  <span class="bg-val mono">{{ ap.wallpaperDim }}%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 底色 + 壁纸 -->
+            <div class="p-block">
+              <div class="p-inline">
+                <span class="bg-label">背景底色</span>
+                <NColorPicker :value="ap.bgColor" :modes="['hex']" size="small" style="width: 112px"
+                              :show-alpha="false" @update:value="(v) => setApp({ bgColor: v })" />
+                <div class="bg-color-chips">
+                  <button v-for="c in BG_COLORS" :key="c.value" class="bg-color-chip"
+                          :class="{ on: ap.bgColor === c.value }" :title="c.name"
+                          :style="{ background: c.value }" @click="setApp({ bgColor: c.value })" />
+                </div>
+                <span class="p-sep" />
+                <input ref="wallInput" type="file" accept="image/*" style="display:none" @change="onWallPick" />
+                <NButton size="tiny" secondary @click="wallInput?.click()">🖼 选择壁纸</NButton>
+                <NButton v-if="ap.wallpaper" size="tiny" quaternary type="error" @click="clearWall">✕ 清除</NButton>
+                <span class="p-block-hint">{{ ap.wallpaper ? '已应用（仅存本机）' : 'JPG/PNG，自动压缩' }}</span>
+              </div>
+            </div>
+
+            <!-- 其他偏好 -->
+            <div class="p-block">
+              <div class="p-inline pref">
+                <span class="bg-label">默认折叠侧边导航</span>
+                <NSwitch v-model:value="store.sidebarCollapsed" size="small" />
+                <span class="p-sep" />
+                <span class="bg-label">天气城市</span>
+                <NSelect :value="store.settings.weatherCity" :options="cityOptions" size="small"
+                         style="width: 104px" @update:value="changeCity" />
+              </div>
+            </div>
+          </div>
+
+          <!-- 右：实时预览 -->
+          <aside class="p-preview">
+            <div class="p-block-head">
+              <span class="p-block-title">实时预览</span>
+              <span class="p-block-hint">壁纸仅存本机</span>
+            </div>
+            <div class="bvp" :style="previewStyle">
+              <div class="bvp-sheen" :style="{ opacity: (ap.glow / 100) * 0.9 }" />
+              <div class="bvp-grid" :style="{ opacity: ap.grid / 100 }" />
+              <div class="bvp-top">
+                <i class="bvp-dot" />
+                <div class="bvp-bar w40" />
+                <i class="bvp-pill" :style="{ background: s.accent }" />
+              </div>
+              <div class="bvp-card" :style="{ borderRadius: ap.radius + 'px' }">
+                <div class="bvp-line w60" />
+                <div class="bvp-line w90" />
+                <div class="bvp-line w40" />
+              </div>
+              <div class="bvp-row">
+                <div class="bvp-card sm" :style="{ borderRadius: ap.radius + 'px' }">
+                  <div class="bvp-line w70" />
+                  <div class="bvp-line w50" />
+                </div>
+                <div class="bvp-card sm" :style="{ borderRadius: ap.radius + 'px' }">
+                  <div class="bvp-line w80" />
+                  <div class="bvp-line w30" />
+                </div>
+              </div>
+            </div>
+          </aside>
         </div>
       </section>
 
@@ -359,16 +575,109 @@ async function grantQuota(kind) {
 .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; min-width: 0; }
 .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 10px; }
 
-.accent-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+/* ─────────── 个性化外观（强调色 + 背景外观 合并）─────────── */
+.personal { padding-bottom: 16px; }
+.head-ops { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+/* 左右两栏：控制项（自适应） + 预览（固定窄栏） */
+.p-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(206px, 258px);
+  gap: 16px;
+  align-items: stretch;      /* 两栏等高：预览区自动填满，避免右侧留白 */
+}
+.p-ctrl { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.p-block {
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 9px 12px; background: rgba(255, 255, 255, 0.014);
+}
+.p-block-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 10px; margin-bottom: 8px;
+}
+.p-block-title { font-size: 11.5px; color: var(--text-2); font-weight: 600; white-space: nowrap; }
+.p-block-hint { font-size: 10px; color: var(--text-3); text-align: right; }
+
+.p-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.p-inline.pref { gap: 10px; }
+.p-sep { width: 1px; height: 16px; background: var(--border); flex-shrink: 0; }
+.bg-color-chips { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+
+.accent-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 8px; }
 .accent-btn {
-  display: flex; align-items: center; gap: 10px; cursor: pointer;
-  padding: 10px 12px; border-radius: 10px; background: transparent;
-  border: 1px solid var(--border); color: var(--text-2); font-size: 12.5px;
+  display: flex; align-items: center; gap: 7px; cursor: pointer;
+  padding: 7px 10px; border-radius: 9px; background: transparent;
+  border: 1px solid var(--border); color: var(--text-2); font-size: 11.5px;
+  text-align: left; min-width: 0;
 }
 .accent-btn:hover { border-color: #3a3a3a; color: var(--text-1); }
 .accent-btn.on { border-color: var(--accent); background: rgba(74, 222, 128, 0.07); color: var(--text-1); }
-.accent-btn em { margin-left: auto; font-style: normal; font-size: 10px; color: var(--text-3); }
-.sw { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
+.accent-btn em { margin-left: auto; font-style: normal; font-size: 9.5px; color: var(--text-3); }
+.accent-btn.on em { color: var(--text-2); }
+.accent-btn .a-name { white-space: nowrap; }
+.sw { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+
+.bg-presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 7px; }
+.bg-preset {
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 9px; padding: 7px 9px;
+  background: transparent; color: var(--text-2); font-size: 11px; text-align: left; min-width: 0;
+}
+.bg-preset:hover { border-color: #3a3a3a; color: var(--text-1); }
+.bg-preset.on { border-color: var(--accent); background: rgba(74, 222, 128, 0.07); color: var(--text-1); }
+.bg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.bg-dot.sm { width: 6px; height: 6px; opacity: 0.75; }
+
+.p-sliders { display: flex; flex-direction: column; gap: 2px; }
+.bg-slider-row { display: flex; align-items: center; gap: 10px; padding: 2px 0; }
+.bg-label { font-size: 11px; color: var(--text-2); white-space: nowrap; flex-shrink: 0; }
+.bg-slider { flex: 1; min-width: 80px; }
+.bg-val { font-size: 10px; color: var(--text-3); width: 40px; text-align: right; flex-shrink: 0; }
+
+.bg-color-chip {
+  width: 19px; height: 19px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--border-strong); padding: 0; flex-shrink: 0;
+}
+.bg-color-chip.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* 预览栏 */
+.p-preview { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.bvp {
+  position: relative; overflow: hidden; flex: 1; min-height: 200px;
+  border: 1px solid var(--border); border-radius: 12px;
+  display: flex; flex-direction: column; justify-content: center; gap: 9px; padding: 13px;
+  background-size: cover; background-position: center;
+}
+.bvp-sheen { position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(150px 100px at 20% 0%, rgba(74, 222, 128, 0.25), transparent 70%); }
+.bvp-grid { position: absolute; inset: 0; pointer-events: none;
+  background-image: linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px);
+  background-size: 24px 24px; }
+.bvp-top { position: relative; z-index: 1; display: flex; align-items: center; gap: 6px; }
+.bvp-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 8px var(--accent); flex-shrink: 0; }
+.bvp-bar { height: 4px; border-radius: 2px; background: rgba(255,255,255,0.16); }
+.bvp-pill { width: 26px; height: 11px; border-radius: 999px; margin-left: auto; flex-shrink: 0; opacity: .9; }
+.bvp-card {
+  position: relative; z-index: 1; padding: 7px 9px; display: flex; flex-direction: column; gap: 5px;
+  background: var(--card); border: 1px solid var(--border);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+}
+.bvp-row { position: relative; z-index: 1; display: flex; gap: 7px; }
+.bvp-row .bvp-card { flex: 1; min-width: 0; }
+.bvp-card.sm { width: 100%; }
+.bvp-line { height: 4px; border-radius: 3px; background: rgba(255, 255, 255, 0.14); }
+.bvp-line.w30 { width: 30%; } .bvp-line.w40 { width: 40%; } .bvp-line.w50 { width: 50%; }
+.bvp-line.w60 { width: 60%; } .bvp-line.w70 { width: 70%; }
+.bvp-line.w80 { width: 80%; } .bvp-line.w90 { width: 90%; }
+
+@media (max-width: 1180px) {
+  .p-body { grid-template-columns: 1fr; }
+  .bvp { min-height: 168px; }
+  .p-block-head { flex-wrap: wrap; }
+  .p-block-hint { text-align: left; }
+}
 
 .divider { height: 1px; background: var(--border); margin: 16px 0; }
 .set-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px dashed var(--border); }
@@ -377,8 +686,7 @@ async function grantQuota(kind) {
 .hint { font-size: 10.5px; color: var(--text-3); margin-top: 10px; line-height: 1.7; }
 .hint em { color: var(--accent); font-style: normal; }
 
-.src-row { display: flex; align-items: center; gap: 14px; padding: 9px 0; border-bottom: 1px dashed var(--border); }
-.src-row .label-3 { width: 82px; flex-shrink: 0; }
+.src-row { display: flex; align-items: center; gap: 14px; padding: 9px 0; border-bottom: 1px dashed var(--border); }.src-row .label-3 { width: 82px; flex-shrink: 0; }
 .v { font-size: 11.5px; color: var(--text-2); word-break: break-all; }
 .v.ok { color: var(--accent); }
 .btn-row { display: flex; gap: 10px; margin-top: 14px; }

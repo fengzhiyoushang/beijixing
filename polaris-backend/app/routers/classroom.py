@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import io
-from datetime import date
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import StreamingResponse
@@ -16,6 +16,21 @@ from app.schemas.classroom import ClassroomIn, ClassroomUpdate, StatusReportIn, 
 from app.services import classroom_service, storage
 
 router = APIRouter(prefix="/classroom", tags=["④⑤ 空教室"])
+
+
+def _parse_query_date(value: str | None) -> date | None:
+    """解析查询日期（YYYY-MM-DD / YYYY/MM/DD）；非法值返回 None 由服务层回退到今天。"""
+    if not value:
+        return None
+    text = str(value).strip().replace("/", "-").replace(".", "-")
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    raise AppError(f"日期格式不正确：{value}（应为 YYYY-MM-DD）")
 
 
 # ─────────── 分析类（置于 /classrooms/{id} 之前） ───────────
@@ -39,14 +54,28 @@ def free_rate(building: str = Query(...), room_no: str = Query(...),
 
 @router.get("/building-usage", summary="某教学楼每间教室的使用状态图（绿=空闲/红=占用/灰=无数据）")
 def building_usage(building: str = Query(...), days_back: int = Query(default=120, ge=7, le=730),
+                   on_date: str | None = Query(default=None, description="查询日期 YYYY-MM-DD，按该日期所在教学周匹配课表周次"),
+                   week: int | None = Query(default=None, ge=1, le=60, description="直接指定教学周，优先于日期"),
                    db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    return classroom_service.building_usage(db, building, days_back=days_back, user_id=user.id)
+    d = _parse_query_date(on_date)
+    return classroom_service.building_usage(db, building, days_back=days_back, user_id=user.id,
+                                            week=week, on_date=d)
 
 
 @router.get("/campus-usage", summary="全校教学楼使用状态（每楼一张 楼层×教室序号 图的数据源）")
 def campus_usage(days_back: int = Query(default=120, ge=7, le=730),
+                 on_date: str | None = Query(default=None, description="查询日期 YYYY-MM-DD（按该日期所在教学周判定课表占用）"),
+                 week: int | None = Query(default=None, ge=1, le=60, description="直接指定教学周，优先于日期"),
                  db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    return classroom_service.campus_usage(db, days_back=days_back, user_id=user.id)
+    d = _parse_query_date(on_date)
+    return classroom_service.campus_usage(db, days_back=days_back, user_id=user.id,
+                                         week=week, on_date=d)
+
+
+@router.get("/semester", summary="当前学期信息（起始日对齐到周一、总周数、某日期对应教学周）")
+def semester(on_date: str | None = Query(default=None),
+             db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    return classroom_service.semester_info(db, user.id, _parse_query_date(on_date))
 
 
 @router.get("/predict", summary="空闲教室预测推荐（时间衰减加权 + 课程占用惩罚）")
@@ -285,8 +314,10 @@ async def usage_import_excel(file: UploadFile = File(...),
 @router.get("/usage-at", summary="某教室在指定时段的使用详情（当前时段 + 上次使用）")
 def usage_at(building: str = Query(...), room_no: str = Query(...),
              day: date | None = Query(default=None), hour: int | None = Query(default=None, ge=0, le=23),
+             week: int | None = Query(default=None, ge=1, le=60, description="指定教学周，缺省由日期换算"),
              db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    return classroom_service.room_usage_at(db, building, room_no, day=day, hour=hour)
+    return classroom_service.room_usage_at(db, building, room_no, day=day, hour=hour,
+                                           week=week, user_id=user.id)
 
 
 @router.get("/usage/template", summary="下载教室使用信息 Excel 模板")

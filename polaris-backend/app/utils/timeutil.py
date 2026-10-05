@@ -73,6 +73,51 @@ def current_week(start_date: date | None, today: date | None = None) -> int:
     return max(1, delta // 7 + 1)
 
 
+# ─────────── 精确日期 ↔ 教学周 换算 ───────────
+# 教学周约定：start_date 为第 1 周的周一；第 N 周 = [start + (N-1)*7, start + N*7 - 1]
+# 例：2025-08-31（周一）为第 1 周 → 2025-09-01(周一，第 1 周) / 2025-11-03 为第 10 周。
+
+def week_of_date(start_date: date | None, target: date | None = None) -> int | None:
+    """指定日期落在教学第几周；学期未设置或不在学期范围内返回 None。
+
+    与 current_week 的区别：不夹取到 >=1，超出学期范围的日期返回 None，
+    便于调用方区分「学期外」与「第 1 周」。
+    """
+    if not start_date:
+        return None
+    target = target or date.today()
+    delta = (target - start_date).days
+    if delta < 0:
+        return None
+    return delta // 7 + 1
+
+
+def date_of_week_day(start_date: date | None, week: int, weekday: int) -> date | None:
+    """教学周 + 星期(1=周一..7=周日) → 具体日期。"""
+    if not start_date or week < 1:
+        return None
+    weekday = max(1, min(7, weekday))
+    return start_date + timedelta(days=(week - 1) * 7 + (weekday - 1))
+
+
+def week_range(start_date: date | None, week: int) -> tuple[date, date] | None:
+    """某教学周的起止日期（周一 ~ 周日）。"""
+    first = date_of_week_day(start_date, week, 1)
+    if not first:
+        return None
+    return first, first + timedelta(days=6)
+
+
+def align_to_monday(d: date) -> date:
+    """把任意日期归到所在周的周一（教学周对齐用）。"""
+    return d - timedelta(days=d.isoweekday() - 1)
+
+
+def normalize_semester_start(d: date | None) -> date | None:
+    """学期起始日归一到周一：保证「8/31 为第 1 周」这类约定成立。"""
+    return align_to_monday(d) if d else None
+
+
 def semester_bounds(start: date, total_weeks: int) -> tuple[date, date]:
     return start, start + timedelta(weeks=total_weeks) - timedelta(days=1)
 

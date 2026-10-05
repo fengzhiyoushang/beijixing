@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { NButton, NForm, NFormItem, NInput, NModal, NPopconfirm, NSelect, useMessage } from 'naive-ui'
+import { NButton, NForm, NFormItem, NInput, NInputNumber, NModal, NPopconfirm, NSelect, useMessage } from 'naive-ui'
 import { store } from '../store'
 import { coursesApi } from '../api'
 import PdfScheduleView from './PdfScheduleView.vue'
@@ -739,15 +739,29 @@ onMounted(() => {
       </div>
       <div class="sem-form">
         <div class="sf-title mono">{{ semEditing ? `✎ 编辑「${semEditing.name}」` : '＋ 新建学期' }}</div>
-        <NForm label-placement="left" label-width="72" size="small">
-          <div class="sf-grid">
-            <NFormItem label="名称" required><NInput v-model:value="semForm.name" placeholder="如 2026-2027 学年第一学期" /></NFormItem>
-            <NFormItem label="总周数"><NInput v-model:value="semForm.total_weeks" type="number" /></NFormItem>
-            <NFormItem label="开始日期"><NInput v-model:value="semForm.start_date" type="date" /></NFormItem>
-            <NFormItem label="结束日期"><NInput v-model:value="semForm.end_date" type="date" /></NFormItem>
-          </div>
-        </NForm>
-        <div style="display:flex; justify-content:flex-end; gap:8px">
+        <div class="sf-grid">
+          <label class="sf-item sf-name">
+            <span class="sf-label">名称 <i>*</i></span>
+            <NInput v-model:value="semForm.name" size="small" placeholder="如 2026-2027 学年第一学期" />
+          </label>
+          <label class="sf-item sf-weeks">
+            <span class="sf-label">总周数</span>
+            <NInputNumber v-model:value="semForm.total_weeks" size="small" :min="1" :max="60"
+                          :show-button="false" placeholder="20" />
+          </label>
+          <label class="sf-item">
+            <span class="sf-label">开始日期</span>
+            <NInput v-model:value="semForm.start_date" size="small" type="date" />
+          </label>
+          <label class="sf-item">
+            <span class="sf-label">结束日期</span>
+            <NInput v-model:value="semForm.end_date" size="small" type="date" />
+          </label>
+        </div>
+        <div class="sf-tip mono">
+          总周数用于课表周次与空教室占用判定；开始日期建议填第 1 周的周一（如 2026-08-31）
+        </div>
+        <div class="sf-actions">
           <NButton v-if="semEditing" size="small" quaternary @click="newSemester">取消编辑</NButton>
           <NButton size="small" type="primary" :loading="savingSem" @click="saveSemester">{{ semEditing ? '保存修改' : '创建学期' }}</NButton>
         </div>
@@ -847,8 +861,23 @@ onMounted(() => {
 .sem-name { font-size: 13px; color: var(--text-1); }
 .sem-meta { font-size: 10.5px; color: var(--text-3); margin-top: 2px; }
 .sem-form { border-top: 1px solid var(--border); padding-top: 12px; }
-.sf-title { font-size: 11.5px; color: var(--text-2); margin-bottom: 8px; }
-.sf-grid { display: grid; grid-template-columns: 1.4fr 0.6fr 1fr 1fr; gap: 0 12px; }
+.sf-title { font-size: 11.5px; color: var(--text-2); margin-bottom: 10px; }
+/* 表单：名称占主列，总周数给足固定宽度，两个日期等宽；窄屏自动换行不挤压 */
+.sf-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(120px, 150px) minmax(150px, 190px) minmax(150px, 190px);
+  gap: 10px 12px;
+  align-items: end;
+}
+.sf-item { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.sf-label { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.sf-label i { color: #f87171; font-style: normal; }
+.sf-tip { font-size: 10px; color: var(--text-3); margin-top: 9px; line-height: 1.6; }
+.sf-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+@media (max-width: 720px) {
+  .sf-grid { grid-template-columns: 1fr 1fr; }
+  .sf-name { grid-column: 1 / -1; }
+}
 
 /* 视图切换 */
 .view-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }

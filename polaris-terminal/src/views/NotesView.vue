@@ -188,7 +188,6 @@ function toneOf(n) {
   <div class="page">
     <div class="page-head">
       <h2>事项备忘</h2>
-      <span class="sub mono">TASKS · 全生命周期推进</span>
       <span class="spacer" />
       <NButton size="small" type="primary" @click="openNew">＋ 新建事项</NButton>
     </div>

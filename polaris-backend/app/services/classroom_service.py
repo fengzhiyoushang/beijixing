@@ -16,7 +16,8 @@ from app.core.exceptions import AppError, NotFoundError
 from app.models.classroom import Classroom, ClassroomStatusLog, ClassroomUsageRecord
 from app.models.course import Course, CourseSchedule, Semester
 from app.models.pdf_schedule import PdfScheduleEntry, PdfScheduleUpload
-from app.utils.timeutil import (current_week, parse_weeks, ranges_overlap, to_minutes, weekday_of)
+from app.utils.timeutil import (date_of_week_day, normalize_semester_start, parse_weeks,
+                                ranges_overlap, to_minutes, week_of_date, week_range, weekday_of)
 
 logger = logging.getLogger("polaris.classroom")
 
@@ -68,10 +69,12 @@ def list_buildings(db: Session) -> list[dict]:
 
 
 def building_usage(db: Session, building: str, *, days_back: int = 120,
-                   user_id: int | None = None) -> dict:
+                   user_id: int | None = None, week: int | None = None,
+                   on_date=None) -> dict:
     """某教学楼内每间教室的 weekday×hour 使用状态（绿=空闲/红=占用/灰=无数据）。
 
     每个格子按该时段历史快照多数表决：free 多数→空闲，busy 多数→占用，无样本→null。
+    week/on_date 决定按哪个教学周匹配教室课表的周次列（支持按精确日期查询）。
     一次查询整楼日志，避免逐间请求。
     """
     rooms = (db.query(Classroom)
@@ -99,7 +102,7 @@ def building_usage(db: Session, building: str, *, days_back: int = 120,
             cells[(room_no, weekday, hour)][1] += 1
 
     out_rooms = []
-    sched_busy, sched_known = _schedule_busy_map(db, user_id=user_id)
+    sched_busy, sched_known = _schedule_busy_map(db, user_id=user_id, week=week, on_date=on_date)
     for room in rooms:
         key = (room.building, room.room_no)
         room_busy = sched_busy.get(key, frozenset())
@@ -126,11 +129,16 @@ def building_usage(db: Session, building: str, *, days_back: int = 120,
             "samples": room_samples.get(room.room_no, 0),
             "matrix": matrix,
         })
-    return {"building": building, "hours": WORK_HOURS, "days": list(range(1, 8)), "rooms": out_rooms}
+    return {"building": building, "hours": WORK_HOURS, "days": list(range(1, 8)),
+            "rooms": out_rooms, "semester": semester_info(db, user_id, on_date)}
 
 
-def campus_usage(db: Session, *, days_back: int = 120, user_id: int | None = None) -> dict:
-    """全校所有教学楼的使用状态（每楼每间教室 weekday×hour 多数表决），一次返回。"""
+def campus_usage(db: Session, *, days_back: int = 120, user_id: int | None = None,
+                 week: int | None = None, on_date=None) -> dict:
+    """全校所有教学楼的使用状态（每楼每间教室 weekday×hour 多数表决），一次返回。
+
+    week/on_date 决定按哪个教学周匹配课表周次（支持按精确日期查询）。
+    """
     rooms = (db.query(Classroom)
              .filter(Classroom.is_active == True)  # noqa: E712
              .order_by(Classroom.building, Classroom.floor, Classroom.room_no).all())
@@ -150,8 +158,8 @@ def campus_usage(db: Session, *, days_back: int = 120, user_id: int | None = Non
         elif status == "busy":
             cells[(building, room_no, weekday, hour)][1] += 1
 
-    # 课表占用（导入教室课表 Excel / PDF 课表）：当前教学周有排课的时段直接视为使用
-    sched_busy, sched_known = _schedule_busy_map(db, user_id=user_id)
+    # 课表占用（导入教室课表 Excel / PDF 课表）：指定教学周有排课的时段直接视为使用
+    sched_busy, sched_known = _schedule_busy_map(db, user_id=user_id, week=week, on_date=on_date)
 
     grouped: dict[str, list] = defaultdict(list)
     for room in rooms:
@@ -180,6 +188,7 @@ def campus_usage(db: Session, *, days_back: int = 120, user_id: int | None = Non
         "hours": WORK_HOURS,
         "days": list(range(1, 8)),
         "buildings": [{"building": b, "rooms": r} for b, r in sorted(grouped.items())],
+        "semester": semester_info(db, user_id, on_date),
     }
 
 
@@ -341,16 +350,71 @@ def _match_schedule_room(building: str, room_no: str, location: str, all_buildin
     return re.search(rf"(?<!\d){re.escape(num)}(?!\d)", location) is not None
 
 
-def _schedule_busy_map(db: Session, user_id: int | None = None) -> tuple[dict, set]:
+def _active_semester(db: Session, user_id: int | None = None) -> Semester | None:
+    """当前生效学期：优先取该用户的 is_current 学期，其次取全局 is_current，最后取任一条。"""
+    q = db.query(Semester)
+    if user_id:
+        sem = (q.filter(Semester.user_id == user_id, Semester.is_current.is_(True))
+               .order_by(Semester.id.desc()).first())
+        if sem:
+            return sem
+    sem = q.filter(Semester.is_current.is_(True)).order_by(Semester.id.desc()).first()
+    if sem:
+        return sem
+    return q.order_by(Semester.id.desc()).first()
+
+
+def resolve_query_week(db: Session, user_id: int | None, on_date=None,
+                       week: int | None = None) -> tuple[int | None, Semester | None]:
+    """把「查询目标」解析为教学周号。
+
+    优先级：显式 week > 精确日期 on_date 换算 > 当前日期对应周。
+    学期起始统一按「第 1 周的周一」对齐（如 2025-08-31 周一 → 第 1 周）。
+    """
+    sem = _active_semester(db, user_id)
+    if week is not None:
+        return max(1, int(week)), sem
+    start = normalize_semester_start(sem.start_date) if sem and sem.start_date else None
+    target = on_date or date.today()
+    return week_of_date(start, target), sem
+
+
+def semester_info(db: Session, user_id: int | None = None, on_date=None) -> dict:
+    """学期元信息：起始日（对齐到周一）、总周数、目标日期对应的教学周与日期范围。"""
+    sem = _active_semester(db, user_id)
+    start = normalize_semester_start(sem.start_date) if sem and sem.start_date else None
+    total = sem.total_weeks if sem else 20
+    target = on_date or date.today()
+    wk = week_of_date(start, target)
+    rng = week_range(start, wk) if (start and wk) else None
+    return {
+        "name": sem.name if sem else None,
+        "start_date": start.isoformat() if start else None,
+        "total_weeks": total,
+        "query_date": target.isoformat(),
+        "week": wk,
+        "week_start": rng[0].isoformat() if rng else None,
+        "week_end": rng[1].isoformat() if rng else None,
+        "in_semester": bool(wk and 1 <= wk <= total),
+    }
+
+
+def _schedule_busy_map(db: Session, user_id: int | None = None, *,
+                       week: int | None = None, on_date=None) -> tuple[dict, set]:
     """教室课表占用：返回 (busy, known_rooms)。
 
     busy: (building, room_no) -> {(weekday, hour)} 有课时段
     known_rooms: 导入过课表的教室集合（这些教室无课的时段视为"空闲/绿"，
                  未导入课表的教室保持"未知/灰"）。
+
+    week 的确定：显式传入的 week > on_date 换算出的周 > 当前日期所在周。
+    这样即可支持「按精确日期查询」：不同日期会解析出不同周次，从而精确匹配
+    Excel 中的周次列（如 1-16周 / 2-16周双）。
+
     只统计 source=classroom 的教室课表与 PDF 课表；个人课表不影响全校热力图。"""
-    sem = db.query(Semester).filter(Semester.is_current.is_(True)).first()
-    week = current_week(sem.start_date) if sem and sem.start_date else None
-    total = sem.total_weeks if sem else 20
+    total_sem = _active_semester(db, user_id)
+    total = total_sem.total_weeks if total_sem else 20
+    week, _ = resolve_query_week(db, user_id, on_date=on_date, week=week)
 
     items: list[tuple[int, str, str, str, str]] = []
     sched_q = (db.query(CourseSchedule)
@@ -789,17 +853,33 @@ def _classify_course(name: str) -> str:
 
 
 def _room_courses(db: Session, building: str, room_no: str,
-                  weekday: int, at: str, day: date) -> list[dict]:
-    """该教室在 weekday×时刻 的课程安排：PDF 课表条目 + 课程表（Course）双来源合并。"""
+                  weekday: int, at: str, day: date,
+                  week: int | None = None) -> list[dict]:
+    """该教室在 weekday×时刻 的课程安排：PDF 课表条目 + 课程表（Course）双来源合并。
+
+    week 缺省时按 day 换算教学周；两个来源都会用该周次过滤 weeks 表达式
+    （如 "2-16周双"），从而精确判断「某月某日某时段」是否有课。
+    """
     hour_end = f"{int(at[:2]) + 1:02d}:00"
     out: list[dict] = []
     seen: set[tuple] = set()
 
-    # 来源①：PDF 教室课表解析条目（含班级信息）
-    sem = db.query(Semester).filter(Semester.is_current.is_(True)).first()
-    week = current_week(sem.start_date, day) if sem and sem.start_date else None
+    sem = _active_semester(db)
     total = sem.total_weeks if sem else 20
+    if week is None:
+        start = normalize_semester_start(sem.start_date) if sem and sem.start_date else None
+        week = week_of_date(start, day)
     all_buildings = [b for (b,) in db.query(Classroom.building).distinct().all()]
+
+    def _week_ok(expr: str | None) -> bool:
+        """该课周次表达式是否覆盖查询周；查询周为 None（学期外）时不过滤。"""
+        if week is None:
+            return True
+        if not expr:
+            return True
+        return week in parse_weeks(expr, total)
+
+    # 来源①：PDF 教室课表解析条目（含班级信息）
     q = (db.query(PdfScheduleEntry, PdfScheduleUpload.filename)
          .join(PdfScheduleUpload, PdfScheduleEntry.upload_id == PdfScheduleUpload.id)
          .filter(PdfScheduleEntry.weekday == weekday))
@@ -808,7 +888,7 @@ def _room_courses(db: Session, building: str, room_no: str,
             continue
         if not ranges_overlap(e.start_time, e.end_time, at, hour_end):
             continue
-        if week and week not in parse_weeks(e.weeks, total):
+        if not _week_ok(e.weeks):
             continue
         key = (e.course_name, e.start_time, e.end_time)
         if key in seen:
@@ -822,7 +902,7 @@ def _room_courses(db: Session, building: str, room_no: str,
             "location": e.location or f"{building} {room_no}", "detail": filename,
         })
 
-    # 来源②：课程表（本人导入的课，按地点匹配教室号）
+    # 来源②：课程表（教室课表导入 + 本人课表，按地点匹配教室号）
     q2 = (db.query(CourseSchedule, Course)
           .join(Course, CourseSchedule.course_id == Course.id)
           .filter(CourseSchedule.weekday == weekday))
@@ -831,6 +911,8 @@ def _room_courses(db: Session, building: str, room_no: str,
         if not loc or not _match_schedule_room(building, room_no, loc, all_buildings):
             continue
         if not ranges_overlap(slot.start_time, slot.end_time, at, hour_end):
+            continue
+        if not _week_ok(slot.weeks):
             continue
         key = (course.name, slot.start_time, slot.end_time)
         if key in seen:
@@ -848,8 +930,12 @@ def _room_courses(db: Session, building: str, room_no: str,
 
 
 def room_usage_at(db: Session, building: str, room_no: str,
-                  day: date | None = None, hour: int | None = None) -> dict:
-    """某教室在指定时段的使用详情：课程安排 + 当前时段记录 + 上次使用（供点击格子弹窗）。"""
+                  day: date | None = None, hour: int | None = None,
+                  week: int | None = None, user_id: int | None = None) -> dict:
+    """某教室在指定时段的使用详情：课程安排 + 当前时段记录 + 上次使用（供点击格子弹窗）。
+
+    week 缺省时由 day 换算；返回值带 semester 与 week，便于前端显示「第 N 周」。
+    """
     day = day or date.today()
     now = datetime.now()
     if hour is None and day == now.date():
@@ -857,7 +943,7 @@ def room_usage_at(db: Session, building: str, room_no: str,
     else:
         at = f"{(hour if hour is not None else 8):02d}:00"
     weekday = day.isoweekday()
-    courses = _room_courses(db, building, room_no, weekday, at, day)
+    courses = _room_courses(db, building, room_no, weekday, at, day, week=week)
 
     def _covers(rec: ClassroomUsageRecord) -> bool:
         return rec.use_date == day and rec.start_time <= at < rec.end_time
@@ -902,4 +988,5 @@ def room_usage_at(db: Session, building: str, room_no: str,
         "previous": prev.to_dict() if prev else None,
         "day_records": [r.to_dict() for r in day_recs],
         "recent_logs": fallback or [],
+        "semester": semester_info(db, user_id, day),
     }

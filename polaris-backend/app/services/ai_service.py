@@ -13,9 +13,32 @@ from app.ai.deepseek import deepseek
 from app.ai.rag import build_context, search
 from app.core.config import settings
 from app.core.exceptions import NotFoundError
-from app.models.ai import AiMessage, AiSession
+from app.models.ai import AiMessage, AiSession, AiUsage
+from app.services import ai_config_service
 
 logger = logging.getLogger("polaris.ai.service")
+
+
+# ─────────── 模型配置与用量 ───────────
+def llm_cfg(user) -> dict:
+    """用户自定义优先、全局 .env 兜底（由 deepseek._resolve 处理，这里直接透传）。"""
+    return ai_config_service.get_llm_cfg(user)
+
+
+def record_usage(db: Session, user_id: int, session_id: int | None, model: str,
+                 usage: dict | None, provider: str = "openai") -> None:
+    """把 provider 返回的真实 usage 记入台账（mock/无 usage 不记账）。"""
+    if not usage:
+        return
+    row = AiUsage(
+        user_id=user_id, session_id=session_id, model=model or "", provider=provider,
+        prompt_tokens=int(usage.get("prompt_tokens") or 0),
+        completion_tokens=int(usage.get("completion_tokens") or 0),
+        total_tokens=int(usage.get("total_tokens") or 0),
+        estimated=bool(usage.get("estimated")),
+    )
+    db.add(row)
+    db.commit()
 
 
 # ─────────── 会话 ───────────
@@ -103,16 +126,22 @@ def build_messages(db: Session, user, session: AiSession, question: str, *,
 
 # ─────────── 工具循环 ───────────
 async def run_tool_loop(db: Session, user, messages: list[dict], *, use_tools: bool = True,
-                        temperature: float = 0.7, on_trace=None) -> tuple[dict, list[dict]]:
-    """执行 Function Call 循环，返回 (最终消息, 工具轨迹)。"""
+                        temperature: float = 0.7, on_trace=None,
+                        session_id: int | None = None) -> tuple[dict, list[dict]]:
+    """执行 Function Call 循环，返回 (最终消息, 工具轨迹)。每轮真实调用记入用量台账。"""
     traces: list[dict] = []
+    cfg = llm_cfg(user)
     if not use_tools:
-        return await deepseek.chat(messages, temperature=temperature), traces
+        res = await deepseek.chat(messages, temperature=temperature, cfg=cfg)
+        record_usage(db, user.id, session_id, res.get("model"), res.get("usage"))
+        return res["message"], traces
 
     tool_specs = tools.specs()
     last_message: dict = {}
     for round_index in range(settings.MAX_TOOL_ROUNDS):
-        last_message = await deepseek.chat(messages, tools=tool_specs, temperature=temperature)
+        res = await deepseek.chat(messages, tools=tool_specs, temperature=temperature, cfg=cfg)
+        record_usage(db, user.id, session_id, res.get("model"), res.get("usage"))
+        last_message = res["message"]
         calls = last_message.get("tool_calls") or []
         if not calls:
             return last_message, traces
@@ -145,8 +174,9 @@ async def run_tool_loop(db: Session, user, messages: list[dict], *, use_tools: b
 
     # 达到最大轮次：关闭工具做最终收敛
     logger.info("工具轮次达到上限 %s，进行最终收敛", settings.MAX_TOOL_ROUNDS)
-    final = await deepseek.chat(messages, tools=None, temperature=temperature)
-    return final, traces
+    res = await deepseek.chat(messages, tools=None, temperature=temperature, cfg=cfg)
+    record_usage(db, user.id, session_id, res.get("model"), res.get("usage"))
+    return res["message"], traces
 
 
 # ─────────── 对话（非流式） ───────────
@@ -160,8 +190,9 @@ async def chat(db: Session, user, payload) -> dict:
     save_message(db, session, "user", payload.message)
     messages = build_messages(db, user, session, payload.message, use_rag=payload.use_rag,
                               custom_system=payload.system)
+    cfg = llm_cfg(user)
     message, traces = await run_tool_loop(db, user, messages, use_tools=payload.use_tools,
-                                          temperature=payload.temperature)
+                                          temperature=payload.temperature, session_id=session.id)
     reply = message.get("content") or "（模型未返回内容）"
     save_message(db, session, "assistant", reply)
 
@@ -169,7 +200,7 @@ async def chat(db: Session, user, payload) -> dict:
         "session_id": session.id,
         "reply": reply,
         "tool_traces": traces,
-        "ai_mode": "live" if deepseek.is_configured else "mock",
+        "ai_mode": "live" if deepseek.status(cfg)["configured"] else "mock",
         "message_count": session.message_count,
     }
 
@@ -180,8 +211,9 @@ async def stream_chat(db: Session, user, payload) -> AsyncGenerator[dict, None]:
     session = ensure_session(db, user.id, payload.session_id,
                              title=payload.message[:40], channel="web")
     save_message(db, session, "user", payload.message)
-    yield {"event": "meta", "data": {"session_id": session.id,
-                                     "mode": "live" if deepseek.is_configured else "mock"}}
+    cfg = llm_cfg(user)
+    mode = "live" if deepseek.status(cfg)["configured"] else "mock"
+    yield {"event": "meta", "data": {"session_id": session.id, "mode": mode}}
 
     messages = build_messages(db, user, session, payload.message, use_rag=payload.use_rag,
                               custom_system=payload.system)
@@ -192,22 +224,25 @@ async def stream_chat(db: Session, user, payload) -> AsyncGenerator[dict, None]:
 
     try:
         message, _ = await run_tool_loop(db, user, messages, use_tools=payload.use_tools,
-                                         temperature=payload.temperature, on_trace=on_trace)
+                                         temperature=payload.temperature, on_trace=on_trace,
+                                         session_id=session.id)
         for trace in queue:
             yield {"event": "tool", "data": trace}
 
         answer = message.get("content")
+        usage: dict | None = None
         if not answer:
             # 工具执行完毕但无自然语言结论 → 追加一轮流式生成
             messages.append({"role": "system",
                              "content": "请基于以上工具返回的数据，用中文简洁总结并给出建议。"})
-            async for chunk in deepseek.stream_chat(messages, temperature=payload.temperature):
+            async for chunk in deepseek.stream_chat(messages, temperature=payload.temperature, cfg=cfg):
                 if chunk["type"] == "token":
                     yield {"event": "token", "data": {"content": chunk["content"]}}
                 elif chunk["type"] == "error":
                     yield {"event": "error", "data": {"message": chunk["message"]}}
                 elif chunk["type"] == "done":
                     answer = chunk.get("content") or ""
+                    usage = chunk.get("usage")
         else:
             # 已有完整结论：分块吐出以获得打字机效果
             import asyncio
@@ -216,8 +251,13 @@ async def stream_chat(db: Session, user, payload) -> AsyncGenerator[dict, None]:
                 yield {"event": "token", "data": {"content": answer[i:i + 8]}}
                 await asyncio.sleep(0.01)
 
+        # 流式生成的真实 usage 记入台账（工具循环内的 usage 已在 run_tool_loop 记账）
+        if usage:
+            record_usage(db, user.id, session.id, cfg.get("model") or deepseek.model, usage)
         save_message(db, session, "assistant", answer or "")
-        yield {"event": "done", "data": {"session_id": session.id, "reply": answer or ""}}
+        summary = ai_config_service.usage_summary(db, user.id, quota=int(cfg.get("quota") or 0))
+        yield {"event": "done", "data": {"session_id": session.id, "reply": answer or "",
+                                         "usage": usage or {}, "token_summary": summary}}
     except Exception as exc:                     # pragma: no cover
         logger.exception("流式对话失败")
         yield {"event": "error", "data": {"message": str(exc)}}

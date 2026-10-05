@@ -176,7 +176,6 @@ function tipTitle(t) {
   <div class="page">
     <div class="page-head">
       <h2>健康管理</h2>
-      <span class="sub mono">HEALTH · 久坐提醒 / 作息 / 运动 / 健康报告</span>
       <span class="spacer" />
       <span class="chip chip-accent">连续打卡 {{ h.checkinStreak }} 天</span>
     </div>

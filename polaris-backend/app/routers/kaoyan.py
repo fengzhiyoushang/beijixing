@@ -11,7 +11,7 @@ from app.models.kaoyan import KaoyanPlanPhase, KaoyanPlanTask
 from app.models.user import User
 from app.schemas.kaoyan import (KaoyanTargetIn, KaoyanTargetUpdate, PhaseIn, PhaseUpdate,
                                 PlanGenerateIn, PlanTaskIn, PlanTaskUpdate, ScoreIn)
-from app.services import dashboard_service, kaoyan_service
+from app.services import dashboard_service, kaoyan_intel_service, kaoyan_service
 
 router = APIRouter(prefix="/kaoyan", tags=["⑦ 考研规划"])
 
@@ -65,6 +65,13 @@ def record_score(body: ScoreIn, db: Session = Depends(get_db),
 @router.get("/progress", summary="考研进度（阶段/每日任务/科目达成）")
 def progress(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     return kaoyan_service.progress(db, user.id)
+
+
+# ─────────── 考研情报（聚焦爬虫：分数线 / 复试 / 就业） ───────────
+@router.get("/intel", summary="目标院校专业历年分数线与就业情报（带缓存）")
+def get_intel(refresh: bool = Query(default=False), db: Session = Depends(get_db),
+              user: User = Depends(get_current_user)) -> dict:
+    return kaoyan_intel_service.get_for_user(db, user.id, force=refresh)
 
 
 # ─────────── 计划 ───────────

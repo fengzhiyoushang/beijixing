@@ -1,10 +1,11 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { NAvatar, NButton, NDropdown, NInput, NModal, NSelect, useMessage } from 'naive-ui'
+import { NButton, NDatePicker, NDropdown, NInput, NModal, NSelect, useMessage } from 'naive-ui'
 import { store } from '../store'
 import { fmtDate, fmtTime, greetingByHour } from '../utils/format'
 import StatusDot from './StatusDot.vue'
+import LlmConfigModal from './LlmConfigModal.vue'
 
 const router = useRouter()
 const message = useMessage()
@@ -125,19 +126,46 @@ async function submitCreate() {
   }
 }
 
-/* ── 用户 ── */
-const userOptions = [
-  { label: '个人资料', key: 'profile' },
-  { label: '战略参数设置', key: 'settings' },
-  { type: 'divider', key: 'd1' },
-  { label: '退出登录', key: 'logout' },
-]
-function handleUser(key) {
-  if (key === 'settings') router.push('/settings')
-  else if (key === 'profile') {
-    message.info(`${store.profile.name} · ${store.profile.school} · ${store.profile.role}`)
-  } else if (key === 'logout') {
-    store.logout()
+/* 用户功能（个人资料/设置/退出）已迁移至左上角头像窗口，见 SideNav.vue */
+
+/* ── Token 真实用量（后端 ai_usage 台账，非估算展示）── */
+const showLlmConfig = ref(false)
+const tokenRefreshing = ref(false)
+function fmtTok(n) {
+  const v = Number(n) || 0
+  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1)}K`
+  return String(v)
+}
+const tokenText = computed(() => {
+  const u = store.tokenSummary
+  if (!u) return 'Token —'
+  const used = fmtTok(u.total_tokens)
+  if (u.remaining === null || u.remaining === undefined) return `Token ${used} · 未设预算`
+  return `Token ${used} / 余 ${fmtTok(u.remaining)}`
+})
+const tokenTitle = computed(() => {
+  const u = store.tokenSummary
+  if (!u) return '点击刷新 Token 用量'
+  return [
+    `累计 ${u.total_tokens?.toLocaleString?.() ?? 0} tokens（${u.calls ?? 0} 次调用）`,
+    `今日 ${u.today_tokens?.toLocaleString?.() ?? 0} · 近7天 ${u.week_tokens?.toLocaleString?.() ?? 0} · 近30天 ${u.month_tokens?.toLocaleString?.() ?? 0}`,
+    u.remaining === null || u.remaining === undefined
+      ? '剩余：未设置预算（可在模型配置中设置）'
+      : `剩余 ${u.remaining?.toLocaleString?.() ?? 0} / 预算 ${u.quota?.toLocaleString?.() ?? 0}`,
+    '点击刷新 · 数据来自 provider 回传的真实 usage',
+  ].join('\n')
+})
+async function refreshToken() {
+  if (tokenRefreshing.value) return
+  tokenRefreshing.value = true
+  try {
+    await store.loadTokenUsage()
+    message.success('Token 用量已刷新')
+  } catch (err) {
+    message.error(`刷新失败：${err.message}`)
+  } finally {
+    tokenRefreshing.value = false
   }
 }
 </script>
@@ -166,18 +194,16 @@ function handleUser(key) {
         <span class="w-temp mono">{{ store.weather.temp }}℃</span>
       </div>
 
+      <!-- Token 真实消耗 / 剩余（点击刷新，齿轮打开模型配置） -->
+      <div class="token-chip" :title="tokenTitle" @click="refreshToken">
+        <span class="t-icon">◈</span>
+        <span class="t-text mono">{{ tokenText }}</span>
+        <button class="t-gear" title="大模型 API 配置" @click.stop="showLlmConfig = true">⚙</button>
+      </div>
+
       <!-- 单个「＋ 新建」按钮：点开即包含「新建待办（可设截止时间）」与其它快捷入口 -->
       <NDropdown :options="createOptions" trigger="click" placement="bottom-end" @select="handleCreate">
         <NButton size="small" type="primary" class="new-btn">＋ 新建</NButton>
-      </NDropdown>
-
-      <NDropdown :options="userOptions" trigger="click" @select="handleUser">
-        <div class="avatar-wrap">
-          <NAvatar round :size="30" color="#4ade80" style="color:#06170d; font-weight:700">
-            {{ store.profile.avatar }}
-          </NAvatar>
-          <span class="dot dot-green online" />
-        </div>
       </NDropdown>
     </div>
 
@@ -234,6 +260,9 @@ function handleUser(key) {
         </div>
       </template>
     </NModal>
+
+    <!-- 大模型 API 配置窗口 -->
+    <LlmConfigModal v-model:show="showLlmConfig" />
   </header>
 </template>
 
@@ -282,6 +311,23 @@ function handleUser(key) {
 }
 .w-icon { font-size: 13px; }
 .w-temp { color: var(--text-1); font-weight: 600; }
+
+/* Token 用量胶囊：真实台账数据，点击刷新 */
+.token-chip {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 6px 4px 11px; border: 1px solid rgba(96, 165, 250, 0.32); border-radius: 999px;
+  background: rgba(96, 165, 250, 0.07); font-size: 12px; color: var(--text-2);
+  cursor: pointer; user-select: none; transition: border-color 0.15s ease, background 0.15s ease;
+}
+.token-chip:hover { border-color: rgba(96, 165, 250, 0.6); background: rgba(96, 165, 250, 0.13); }
+.t-icon { color: #60a5fa; font-size: 12px; }
+.t-text { color: var(--text-1); font-weight: 600; letter-spacing: 0.2px; white-space: nowrap; }
+.t-gear {
+  border: none; background: none; cursor: pointer; color: var(--text-3);
+  font-size: 13px; line-height: 1; padding: 2px 5px; border-radius: 999px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.t-gear:hover { color: #60a5fa; background: rgba(96, 165, 250, 0.16); }
 /* 单个「＋ 新建」按钮（下拉入口已合并进按钮内，无独立小箭头） */
 .new-btn {
   font-weight: 650; font-size: 12.5px;
@@ -290,8 +336,6 @@ function handleUser(key) {
   transition: box-shadow 0.15s ease;
 }
 .new-btn:hover { box-shadow: 0 0 24px rgba(74, 222, 128, 0.45); }
-.avatar-wrap { position: relative; cursor: pointer; }
-.online { position: absolute; right: -1px; bottom: -1px; border: 2px solid var(--bg-2); }
 
 /* 弹窗 */
 .form { display: flex; flex-direction: column; gap: 14px; }
